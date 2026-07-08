@@ -6,7 +6,6 @@ from telegram.constants import ParseMode
 from database.db import get_db
 
 logger = logging.getLogger(__name__)
-OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
 # ================= 🗑 Auto Delete စနစ် =================
 async def auto_delete_job(context: ContextTypes.DEFAULT_TYPE):
@@ -20,28 +19,23 @@ def schedule_delete(context, chat_id, msg_id, delay):
     """သတ်မှတ်ထားသော စက္ကန့်အကြာတွင် ဖျက်ရန် Schedule ဆွဲပေးမည်"""
     context.job_queue.run_once(auto_delete_job, delay, chat_id=chat_id, data=msg_id)
 
-# ================= 🛡️ Admin စစ်ဆေးခြင်း =================
-async def is_admin_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Group Admin (သို့) Owner ဟုတ်မဟုတ် စစ်ဆေးခြင်း"""
-    user_id = update.effective_user.id
-    if user_id == OWNER_ID:
-        return True
-    
-    if update.effective_chat.type in ['group', 'supergroup']:
+# ================= 🛡️ Super Admin စစ်ဆေးခြင်း =================
+def is_super_admin(user_id: int) -> bool:
+    """Owner (သို့) SUPER_ADMINS များသာ ငွေကြေးပိုင်းကို ကိုင်တွယ်ခွင့်ပြုမည်"""
+    owner_id = int(os.getenv("OWNER_ID", "0"))
+    if user_id == owner_id: return True
+    sa_str = os.getenv("SUPER_ADMINS", "")
+    if sa_str:
         try:
-            admins = await context.bot.get_chat_administrators(update.effective_chat.id)
-            admin_ids = [admin.user.id for admin in admins]
-            if user_id in admin_ids:
-                return True
-        except Exception as e:
-            logger.error(f"Admin Check Error: {e}")
-            
+            return user_id in [int(x.strip()) for x in sa_str.split(",") if x.strip()]
+        except ValueError: pass
     return False
 
 # ================= 💰 Fund Commands =================
 async def add_fund(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Group အတွင်း ငွေပေါင်းထည့်ရန် Command (/addfund 5000)"""
-    if not await is_admin_check(update, context):
+    # 📌 Super Admin သာ လုပ်ခွင့်ရှိမည်
+    if not is_super_admin(update.effective_user.id):
         return
 
     args = context.args
@@ -69,15 +63,16 @@ async def add_fund(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = record.get("total", 0)
 
     msg = (
-        "💰 <b>အတန်း ရန်ပုံငွေ စာရင်း</b>\n"
+        "💰 <b>အတန်း ရန်ပုံငွေ စာရင်း (Global)</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        f"📥 စုစုပေါင်း ဝင်ငွေ: {total} ကျပ်"
+        f"📥 စုစုပေါင်း ဝင်ငွေ: {total:,} ကျပ်"
     )
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 async def clear_fund(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Group အတွင်း ရန်ပုံငွေစာရင်း အကုန်ဖျက်ရန် Command (/clearfund)"""
-    if not await is_admin_check(update, context):
+    # 📌 Super Admin သာ လုပ်ခွင့်ရှိမည်
+    if not is_super_admin(update.effective_user.id):
         return
 
     db = get_db()
@@ -104,9 +99,9 @@ async def check_fund(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = record.get("total", 0) if record else 0
 
     msg = (
-        "💰 <b>အတန်း ရန်ပုံငွေ စာရင်း</b>\n"
+        "💰 <b>အတန်း ရန်ပုံငွေ စာရင်း (Global)</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        f"📥 စုစုပေါင်း ဝင်ငွေ: {total} ကျပ်"
+        f"📥 စုစုပေါင်း ဝင်ငွေ: {total:,} ကျပ်"
     )
     sent_msg = await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
     

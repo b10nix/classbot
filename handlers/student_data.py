@@ -1,136 +1,140 @@
-import os
 import re
-from uuid import uuid4
+import uuid
+import logging
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 from database.db import get_db
 
-OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+# 🛡️ Centralized Auth ကို ခေါ်ယူအသုံးပြုခြင်း
+from utils.auth import is_super_admin
 
+logger = logging.getLogger(__name__)
+
+# ================= 🛠️ Helper: UI တည်ဆောက်ခြင်း =================
+def build_fund_text(student_paid: dict, funds: list) -> str:
+    """ရန်ပုံငွေ အခြေအနေကို ပုံဖော်ပေးမည့် Helper Function"""
+    if not funds: return "<i>ရန်ပုံငွေ မရှိသေးပါ</i>"
+    
+    text = ""
+    for f in funds:
+        f_id = f.get("fund_id")
+        if not f_id: continue
+        f_name = f.get("fund_name", f_id)
+        target = f.get("target_amount", 0)
+        paid = student_paid.get(f_id, 0)
+        
+        if paid >= target:
+            text += f"✅ <b>{f_name}:</b> {paid} / {target}\n"
+        elif paid > 0:
+            remain = target - paid
+            text += f"🟡 <b>{f_name}:</b> {paid} / {target} (⚠️ {remain} လိုသေး)\n"
+        else:
+            text += f"🔴 <b>{f_name}:</b> 0 / {target} (⚠️ {target} လိုသေး)\n"
+    return text
+
+def build_student_message(student: dict, funds: list) -> str:
+    """ကျောင်းသားတစ်ယောက်ချင်းစီ၏ Message ကို ပုံဖော်ပေးမည့် Helper Function"""
+    name = student.get("name", "Unknown")
+    roll = student.get("roll_no", "Unknown")
+    phone = student.get("phone", "No Phone")
+    hostel = "Yes" if str(student.get("hostel", "")).lower() in ["yes", "true", "1"] else "No"
+    
+    tg_username = student.get("tg_username")
+    tg_id = student.get("user_id")
+    
+    # Telegram Link ချိတ်ဆက်ခြင်း
+    if tg_username:
+        tg_link = f"@{tg_username}"
+    elif tg_id:
+        tg_link = f"<a href='tg://user?id={tg_id}'>Profile Link</a>"
+    else:
+        tg_link = "Not Linked"
+
+    fund_text = build_fund_text(student.get("paid_funds", {}), funds)
+
+    msg = (
+        f"👤 <b>Name:</b> {name}\n"
+        f"🎓 <b>Roll No:</b> {roll}\n"
+        f"🏠 <b>Hostel:</b> {hostel}\n"
+        f"📞 <b>Phone:</b> {phone}\n"
+        f"💬 <b>Telegram:</b> {tg_link}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💰 <b>Fund Status:</b>\n{fund_text}"
+    )
+    return msg
+
+# ================= 🔍 Inline Search (Super Admin Only) =================
 async def inline_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Inline Query ဖြင့် ကျောင်းသား ရှာဖွေသည့် စနစ်"""
-    query = update.inline_query.query.strip()
     user_id = update.inline_query.from_user.id
-
-    # 📌 Admin ဖြစ်မှသာ ရှာခွင့်ပေးမည်
-    if user_id != OWNER_ID:
-        results = [
+    
+    # 📌 Admin မဟုတ်ပါက Friendly Access Denied Message ပြမည်
+    if not is_super_admin(user_id):
+        result = [
             InlineQueryResultArticle(
-                id=str(uuid4()),
+                id=str(uuid.uuid4()),
                 title="⛔ Access Denied",
-                description="Admin Only Feature",
-                input_message_content=InputTextMessageContent("⛔ <b>Access Denied:</b> Level 9 Clearance Required.", parse_mode=ParseMode.HTML)
+                description="Super Admin သာလျှင် Search အသုံးပြုခွင့်ရှိပါသည်။",
+                input_message_content=InputTextMessageContent(
+                    "⛔ <b>Access Denied:</b> You do not have Level 9 Clearance to view this record.", 
+                    parse_mode=ParseMode.HTML
+                )
             )
         ]
-        await update.inline_query.answer(results, cache_time=0)
-        return
+        return await update.inline_query.answer(result, cache_time=1, is_personal=True)
 
+    query = update.inline_query.query.strip()
     if not query:
-        return
+        return await update.inline_query.answer([], cache_time=1)
 
     db = get_db()
-    if db is None: return
-
-    # 📌 နာမည် (သို့) Roll No နောက်ဆုံးဂဏန်း ဖြင့် Regex သုံး၍ ရှာခြင်း (Case Insensitive)
-    regex_pattern = re.compile(re.escape(query), re.IGNORECASE)
-    students = await db.student_info.find({
-        "$or": [{"name": regex_pattern}, {"roll_no": regex_pattern}]
-    }).to_list(length=10)
-
-    # 📌 လက်ရှိ ကောက်ခံနေသော ရန်ပုံငွေ အားလုံးကို ဆွဲထုတ်ခြင်း (Error မတက်အောင် စစ်ထုတ်ထားသည်)
+    
+    # 📌 DB ကို အကြိမ်ကြိမ်မခေါ်ဘဲ Fund Data ကို တစ်ခါတည်း Cache လုပ်ယူထားမည်
     funds = await db.funds.find({}).to_list(length=None)
-    fund_map = {
-        f["fund_id"]: {
-            "name": f.get("fund_name", "Unknown Fund"), 
-            "target": f.get("target_amount", 0)
-        } 
-        for f in funds if "fund_id" in f
-    }
+    
+    regex = re.compile(re.escape(query), re.IGNORECASE)
+    students = await db.student_info.find({"$or": [{"roll_no": regex}, {"name": regex}]}).to_list(length=15)
 
     results = []
     for s in students:
+        roll = s.get("roll_no", "Unknown")
         name = s.get("name", "Unknown")
-        roll_no = s.get("roll_no", "Unknown")
-        stu_id = s.get("student_id", "Unknown")
-        phone = s.get("phone", "➖")
-        hostel = "✅ အဆောင်နေ" if s.get("hostel") else "❌ အပြင်နေ"
-
-        paid_funds = s.get("paid_funds", {})
-        tg_id = s.get("tg_id")
-        tg_username = s.get("tg_username")
-
-        # 💬 Telegram လင့်ခ် ဖန်တီးခြင်း (Username ရှိလျှင် @ ပြမည်၊ မရှိလျှင် Profile Link ပြမည်)
-        if tg_username:
-            tg_link = f"\n💬 <b>Telegram:</b> @{tg_username}"
-        elif tg_id:
-            tg_link = f"\n💬 <b>Telegram:</b> <a href='tg://user?id={tg_id}'>Profile သို့ သွားရန်</a>"
-        else:
-            tg_link = ""
-
-        # 💰 ရန်ပုံငွေ စာသား တည်ဆောက်ခြင်း
-        fund_text = "💰 <b>[ ရန်ပုံငွေ အခြေအနေ ]</b>\n"
-        if not fund_map:
-            fund_text += "လောလောဆယ် ကောက်ခံနေသော ရန်ပုံငွေ မရှိပါ။\n"
-        else:
-            for fid, fdata in fund_map.items():
-                target = fdata["target"]
-                paid = paid_funds.get(fid, 0)
-                if paid >= target: status = "✅ အပြည့်သွင်းပြီး"
-                elif paid > 0: status = f"⚠️ {target - paid} ကျပ် လိုသေးသည်"
-                else: status = "❌ မသွင်းရသေးပါ"
-                
-                fund_text += f"🔹 <b>{fdata['name']}:</b> {paid} / {target} MMK ({status})\n"
-
-        # 📄 Final Message (နှိပ်လိုက်လျှင် ပို့မည့်စာ)
-        msg = (
-            f"👤 <b>Name:</b> {name}\n"
-            f"🎓 <b>Student ID:</b> {stu_id}\n"
-            f"🏷 <b>Roll No:</b> {roll_no}\n"
-            f"🏠 <b>Hostel:</b> {hostel}\n"
-            f"📞 <b>Phone:</b> <code>{phone}</code>"
-            f"{tg_link}\n\n"
-            f"{fund_text}"
-        )
-
+        
+        msg_text = build_student_message(s, funds)
+        
         results.append(
             InlineQueryResultArticle(
-                id=str(uuid4()),
-                title=f"{name} ({roll_no})",
-                description=f"Phone: {phone} | Hostel: {'Yes' if s.get('hostel') else 'No'}",
-                input_message_content=InputTextMessageContent(msg, parse_mode=ParseMode.HTML)
+                id=str(uuid.uuid4()),
+                title=f"{roll} - {name}",
+                description=f"Phone: {s.get('phone', 'No Phone')}",
+                input_message_content=InputTextMessageContent(msg_text, parse_mode=ParseMode.HTML)
             )
         )
+        
+    await update.inline_query.answer(results, cache_time=1)
 
-    if not results:
-        results.append(
-            InlineQueryResultArticle(
-                id=str(uuid4()),
-                title="⚠️ ရှာမတွေ့ပါ",
-                description="ကျောင်းသား အမည် သို့မဟုတ် ခုံနံပါတ် အမှားဖြစ်နိုင်ပါသည်။",
-                input_message_content=InputTextMessageContent("⚠️ <b>ရှာဖွေမှုရလဒ် မရှိပါ</b>", parse_mode=ParseMode.HTML)
-            )
-        )
-
-    await update.inline_query.answer(results, cache_time=0)
-
-# ================= 🧪 စမ်းသပ်ရန် Dummy Data သွင်းမည့် Command =================
+# ================= 📌 Add Realistic Dummy Data =================
 async def add_dummy_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID: return
+    if not is_super_admin(update.effective_user.id): return
+    
     db = get_db()
     
-    # ရန်ပုံငွေ အတု ထည့်ခြင်း
-    await db.funds.update_one({"fund_id": "fresher"}, {"$set": {"fund_name": "Fresher Welcome", "target_amount": 10000}}, upsert=True)
-    await db.funds.update_one({"fund_id": "sports"}, {"$set": {"fund_name": "Sports Event", "target_amount": 5000}}, upsert=True)
-    
-    # ကျောင်းသား အတု ထည့်ခြင်း
-    await db.student_info.update_one(
-        {"roll_no": "Sem-II-CEIT-01"},
-        {"$set": {
-            "name": "John John", "student_id": "TUHmb-25U/00123", "phone": "09123456789", "hostel": True,
-            "tg_id": 123456789, "tg_username": "john_doe",
-            "paid_funds": {"fresher": 5000, "sports": 0}
-        }},
+    # Dummy Fund ထည့်သွင်းခြင်း
+    await db.funds.update_one(
+        {"fund_id": "sports"}, 
+        {"$set": {"target_amount": 5000, "fund_name": "Sports Fund"}}, 
         upsert=True
     )
-    await update.message.reply_text("✅ စမ်းသပ်ရန် John John ၏ Data များကို Database ထဲသို့ ထည့်သွင်းပြီးပါပြီ။")
+    
+    # Dummy Students များ ထည့်သွင်းခြင်း
+    for i in range(1, 6):
+        await db.student_info.insert_one({
+            "roll_no": f"Sem-2-CEIT-{i:02d}",
+            "name": f"Dummy User {i}",
+            "phone": f"0912345678{i}",
+            "hostel": "Yes" if i % 2 == 0 else "No",
+            "tg_username": f"dummy_{i}",
+            "paid_funds": {"sports": 2000 * i}  # ပေးသွင်းငွေ အတိုးအလျှော့လေးတွေ ပါဝင်မည်
+        })
+        
+    await update.message.reply_text("✅ Realistic Dummy Data များ (Funds, Students, Payments) ထည့်သွင်းပြီးပါပြီ။")

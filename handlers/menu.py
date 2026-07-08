@@ -1,12 +1,16 @@
-import os
 import asyncio
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
-OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+# 🛡️ Centralized Auth ကို ခေါ်ယူအသုံးပြုခြင်း
+from utils.auth import is_super_admin
+
+logger = logging.getLogger(__name__)
 
 # ================= 🗑 Auto Delete စနစ် =================
+# (မှတ်ချက် - schedule_delete ကို utils/helper.py ထဲတွင် ရေးထားပြီးပါက ဤနေရာမှ ဖျက်၍ import လှမ်းခေါ်နိုင်ပါသည်)
 async def auto_delete_job(context: ContextTypes.DEFAULT_TYPE):
     try: await context.bot.delete_message(chat_id=context.job.chat_id, message_id=context.job.data)
     except: pass
@@ -15,20 +19,10 @@ def schedule_delete(context, chat_id, msg_id, delay=300):
     """မူလသတ်မှတ်ချက် ၅ မိနစ် (စက္ကန့် ၃၀၀) ဖြင့် ဖျက်မည်"""
     context.job_queue.run_once(auto_delete_job, delay, chat_id=chat_id, data=msg_id)
 
-async def is_admin_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    user_id = update.effective_user.id
-    if user_id == OWNER_ID: return True
-    if update.effective_chat.type in ['group', 'supergroup']:
-        try:
-            admins = await context.bot.get_chat_administrators(update.effective_chat.id)
-            admin_ids = [admin.user.id for admin in admins]
-            if user_id in admin_ids: return True
-        except: pass
-    return False
-
 # ================= 🎛️ Main Menu Keyboard =================
-def get_main_menu_keyboard():
-    return InlineKeyboardMarkup([
+def get_main_menu_keyboard(user_id: int):
+    # အခြေခံ Menu များ (လူတိုင်းမြင်ရမည်)
+    keyboard = [
         [
             InlineKeyboardButton("🎓 Academic & Class", callback_data="menu_academic"),
             InlineKeyboardButton("💬 Social & Confess", callback_data="menu_social")
@@ -36,17 +30,27 @@ def get_main_menu_keyboard():
         [
             InlineKeyboardButton("🛠️ Tools & Utility", callback_data="menu_tools"),
             InlineKeyboardButton("💰 Funds & Info", callback_data="menu_funds")
-        ],
-        [
+        ]
+    ]
+    
+    # 📌 Super Admin ဖြစ်မှသာ Admin Console ခလုတ် ပေါ်မည်
+    if is_super_admin(user_id):
+        keyboard.append([
             InlineKeyboardButton("📖 Commands Guide", callback_data="menu_examples"),
             InlineKeyboardButton("⚠️ Admin Console", callback_data="menu_admin")
-        ]
-    ])
+        ])
+    else:
+        keyboard.append([
+            InlineKeyboardButton("📖 Commands Guide", callback_data="menu_examples")
+        ])
+        
+    return InlineKeyboardMarkup(keyboard)
 
 # ================= 🚀 Start System (Boot Animation) =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/start ခေါ်သည့်အခါ Server Connection Animation ဖြင့် Boot တက်မည့်စနစ်"""
     chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
     user_msg_id = update.message.message_id
     
     # 🟢 Frame 1
@@ -86,7 +90,7 @@ Access Level : Granted</pre>
 
 Select Operation Protocol:"""
     
-    await msg.edit_text(text=main_text, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+    await msg.edit_text(text=main_text, reply_markup=get_main_menu_keyboard(user_id), parse_mode=ParseMode.HTML)
     
     # 👈 Menu နှင့် User စာကို မိနစ် ၅ မိနစ်အကြာတွင် အလိုလိုဖျက်မည်
     schedule_delete(context, chat_id, user_msg_id, 300)
@@ -95,6 +99,7 @@ Select Operation Protocol:"""
 # ================= 🗂️ Menu Handler =================
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    user_id = query.from_user.id
     
     if query.data == "back_to_main":
         await query.answer()
@@ -103,7 +108,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Access Level : Granted</pre>
 
 Select Operation Protocol:"""
-        await query.edit_message_text(main_text, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+        await query.edit_message_text(main_text, reply_markup=get_main_menu_keyboard(user_id), parse_mode=ParseMode.HTML)
         return
 
     back_kb = [[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_to_main")]]
@@ -188,7 +193,7 @@ Select Operation Protocol:"""
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode=ParseMode.HTML)
 
     elif query.data == "menu_admin":
-        if await is_admin_check(update, context):
+        if is_super_admin(user_id):
             await query.answer()
             text = """<blockquote><b>⚠️ ADMIN CONSOLE</b></blockquote>
 <pre>📌 ဘဏ္ဍာရေး စီမံခန့်ခွဲမှု:

@@ -328,21 +328,27 @@ async def t_content_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# ================= 🔔 REMINDER JOB =================
+# ================= 🔔 TASKS & TUTORIALS REMINDER JOB =================
 async def tasks_reminder_job(context: ContextTypes.DEFAULT_TYPE):
+    """(၁) နာရီတစ်ခါ အလုပ်လုပ်ပြီး Tutorial/Task များကို ကြိုတင်သတိပေးမည်"""
     db = get_db()
     if db is None: return
 
     mm_tz = timezone(timedelta(hours=6, minutes=30))
     now = datetime.now(mm_tz)
-    group_ids = get_class_groups() # Group ID ယူမည့် Function ရှိပြီးသားဖြစ်ရမည်
+    group_ids = get_class_groups()
     if not group_ids: return
-    main_group_id = group_ids[0]
+    
+    # 📌 ၃ ခုမြောက် Group (CEIT major group) သို့သာ ပို့ရန် (Index 2)
+    # တကယ်လို့ Group ID က ၃ ခု မပြည့်ရင် နောက်ဆုံး Group ကို ယူမည်
+    main_group_id = group_ids[2] if len(group_ids) >= 3 else group_ids[-1]
 
     tasks = await db.tasks.find({"reminded": False}).to_list(length=None)
+    
     for t in tasks:
         dt_target = t.get("target_dt")
         if not dt_target: continue
+        
         dt_target = dt_target.replace(tzinfo=timezone.utc).astimezone(mm_tz)
         task_type = t.get("type", "task")
         
@@ -351,7 +357,14 @@ async def tasks_reminder_job(context: ContextTypes.DEFAULT_TYPE):
         if now >= remind_time and now < dt_target:
             emoji = "📚" if task_type == "tutorial" else "📝"
             title = "TUTORIAL REMINDER" if task_type == "tutorial" else "ASSIGNMENT REMINDER"
-            msg = f"🔔 <b>{title}</b>\n━━━━━━━━━━━━━━━━━━\n{emoji} <b>ဘာသာရပ်:</b> {t.get('subject')}\n📅 <b>နောက်ဆုံးရက်:</b> <code>{t.get('date_str')}</code> (မနက် ၉:၀၀ နာရီ)\n\n📖 <b>အကြောင်းအရာ:</b>\n{t.get('content')}"
+            
+            msg = (
+                f"🔔 <b>{title}</b>\n━━━━━━━━━━━━━━━━━━\n"
+                f"{emoji} <b>ဘာသာရပ်:</b> {t.get('subject')}\n"
+                f"📅 <b>နောက်ဆုံးရက်:</b> <code>{t.get('date_str')}</code> (မနက် ၉:၀၀ နာရီ)\n\n"
+                f"📖 <b>အကြောင်းအရာ:</b>\n{t.get('content')}\n\n"
+                f"<i>(ကြိုတင်ပြင်ဆင်နိုင်ရန် အလိုအလျောက် သတိပေးခြင်း ဖြစ်ပါသည်။)</i>"
+            )
             
             try:
                 await context.bot.send_message(chat_id=main_group_id, text=msg, parse_mode=ParseMode.HTML)

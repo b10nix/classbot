@@ -1,21 +1,47 @@
 import os
-import logging
 from dotenv import load_dotenv
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler, 
+    ConversationHandler, MessageHandler, filters, InlineQueryHandler
+)
+import datetime
+from datetime import timezone, timedelta
 
-load_dotenv()
+# 📌 အဟောင်းတွေကို ကျော်ပြီး .env အသစ်ကိုသာ အတင်းဖတ်ခိုင်းခြင်း (Override)
+load_dotenv(override=True)
 
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ConversationHandler, MessageHandler, filters
+# 📌 1. Custom Logger ကို utils မှ ခေါ်ယူခြင်း
+from utils.logger import get_logger
+logger = get_logger(__name__)
+
+# 📌 .env ထဲကနေ Super Admins တွေကို တကယ်ဖတ်မိလားဆိုတာ Log ထုတ်စစ်ဆေးခြင်း
+logger.info(f"🟢 Loaded Super Admins: {os.getenv('SUPER_ADMINS')}")
+
 from database.db import connect_db
+
+# ================= 📦 HANDLER IMPORTS =================
 from handlers.routing import route_cmd, route_action
-from handlers.academic import add_class, get_timetable_cmd, change_timetable_day, del_class, clear_day, class_reminder_job
-from handlers.tasks import add_task, get_tasks
 from handlers.menu import start, menu_handler
 from handlers.admin_tools import import_members, mention_all
 from handlers.funds import add_fund, clear_fund, check_fund
 from handlers.custom_cmds import add_custom_cmd, del_custom_cmd, handle_custom_cmd
-import datetime
-from datetime import timezone, timedelta
 from handlers.weather import weather_cmd, morning_weather_alert
+from handlers.student_data import inline_search, add_dummy_data
+
+# 📌 Fund & Reports Imports
+from handlers.fund_admin import newfund_cmd, payfund_cmd, setphone_cmd, delfund_cmd, settg_cmd, undo_cmd, history_cmd 
+from handlers.reports import list_cmd, report_cmd, vault_cmd, hostel_cmd, export_cmd, remind_cmd, export_fund_cmd
+
+# 📌 User Registration Imports
+from handlers.user import user_add_start, user_add_hostel_callback, user_set_phone, ADD_HOSTEL
+
+# 📌 Academic & Timetable Imports
+from handlers.academic import (
+    add_task_start, t_subject_callback, t_date_receive, t_content_receive, show_tasks,
+    T_SUBJECT, T_DATE, T_CONTENT, tasks_reminder_job, class_reminder_job,
+    add_class, del_class, clear_day, get_timetable_cmd, change_timetable_day
+)
+
 from handlers.tools import (
     show_creator, show_status, show_wifi, paginate_wifi,
     add_wifi, del_wifi, add_egg, del_egg,
@@ -33,22 +59,24 @@ from handlers.skip import (
     SKIP_MAJOR, SKIP_SUBJECT, SKIP_MISSED
 )
 
-# 📌 ဤနေရာတွင် ရှုပ်နေသော social imports များကို တစ်ခုတည်း အဖြစ် သပ်သပ်ရပ်ရပ် ပေါင်းထားပါသည်
+# 📌 Utilities Imports (Enum States, Helpers)
+from utils.states import State
+from utils.helpers import cancel_conv
+
+# 📌 Admin Settings Imports
+from handlers.admin_settings import (
+    set_cooldown_cmd, set_cooldown_action, set_user_cooldown_cmd, set_daily_limit_cmd,
+    approvers_cmd, approvers_callback, add_approver_receive
+)
+
+# 📌 Social Features (via __init__.py)
 from handlers.social import (
     confess_start, confess_receive, confess_action,
     c1_start, c1_receive_msg, c1_receive_name, c1_action,
-    notice_start, notice_receive, notice_action, cancel_conv,
-    set_cooldown_cmd, set_cooldown_action, set_user_cooldown_cmd, set_daily_limit_cmd, notice999_cmd,
-    admin_approval_action, approvers_cmd, approvers_callback, add_approver_receive, nickname_start, nickname_receive, nickname_action,
-    CONFESS_MSG, CONFESS_CONFIRM, C1_MSG, C1_NAME, C1_CONFIRM,
-    NOTICE_MSG, NOTICE_CONFIRM, APPROVER_ADD, NICK_MSG, NICK_CONFIRM
+    notice_start, notice_receive, notice_action, notice999_cmd,
+    admin_approval_action,
+    nickname_start, nickname_receive, nickname_action
 )
-
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
@@ -65,44 +93,121 @@ def main():
 
     # 🚀 Background Jobs
     app.job_queue.run_repeating(class_reminder_job, interval=60, first=10)
+    app.job_queue.run_repeating(tasks_reminder_job, interval=3600, first=10)
 
     # ================= CONVERSATION HANDLERS =================
+    
+    # 📌 Tasks & Tutorials Add/Edit System 
+    t_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler('addtask', add_task_start),
+            CommandHandler('addtutorial', add_task_start),
+            CommandHandler('edittask', add_task_start),
+            CommandHandler('edittutorial', add_task_start)
+        ],
+        states={
+            T_SUBJECT: [CallbackQueryHandler(t_subject_callback, pattern="^tsubj_")],
+            T_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, t_date_receive)],
+            T_CONTENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, t_content_receive)]
+        },
+        fallbacks=[]
+    )
+    app.add_handler(t_conv)
+
+    # 📌 Custom Confession
     c1_conv = ConversationHandler(
         entry_points=[CommandHandler('confess', c1_start)],
         states={
-            C1_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, c1_receive_msg)],
-            C1_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, c1_receive_name)],
-            C1_CONFIRM: [CallbackQueryHandler(c1_action, pattern="^(send|cancel)_c1")]
+            State.C1_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, c1_receive_msg)],
+            State.C1_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, c1_receive_name)],
+            State.C1_CONFIRM: [CallbackQueryHandler(c1_action, pattern="^(send|cancel)_c1")]
         },
         fallbacks=[CommandHandler('cancel', cancel_conv)]
     )
     app.add_handler(c1_conv)
 
+    # 📌 Anonymous Confession
     confess_conv = ConversationHandler(
         entry_points=[CommandHandler('confess1', confess_start)],
         states={
-            CONFESS_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, confess_receive)],
-            CONFESS_CONFIRM: [CallbackQueryHandler(confess_action, pattern="^(send|cancel)_confess")]
+            State.CONFESS_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, confess_receive)],
+            State.CONFESS_CONFIRM: [CallbackQueryHandler(confess_action, pattern="^(send|cancel)_confess")]
         },
         fallbacks=[CommandHandler('cancel', cancel_conv)]
     )
     app.add_handler(confess_conv)
 
+    # 📌 Notice System
     notice_conv = ConversationHandler(
         entry_points=[CommandHandler('notice', notice_start)],
         states={
-            NOTICE_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, notice_receive)],
-            NOTICE_CONFIRM: [CallbackQueryHandler(notice_action, pattern="^(send|cancel)_notice")]
+            State.NOTICE_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, notice_receive)],
+            State.NOTICE_CONFIRM: [CallbackQueryHandler(notice_action, pattern="^(send|cancel)_notice")]
         },
         fallbacks=[CommandHandler('cancel', cancel_conv)]
     )
     app.add_handler(notice_conv)
 
+    # 📌 Admin Approvers Management
+    approver_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(approvers_callback, pattern="^(addapp_|delapp_|cancel_app)")],
+        states={
+            State.APPROVER_ADD: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_approver_receive)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel_conv)]
+    )
+    app.add_handler(approver_conv)
+    
+    # 📌 Nickname Setup
+    nickname_conv = ConversationHandler(
+        entry_points=[CommandHandler('nickname', nickname_start)],
+        states={
+            State.NICK_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, nickname_receive)],
+            State.NICK_CONFIRM: [CallbackQueryHandler(nickname_action, pattern="^savenick_")]
+        },
+        fallbacks=[CommandHandler('cancel', cancel_conv)]
+    )
+    app.add_handler(nickname_conv)
+
+    # 📌 Self Registration System
+    user_add_conv = ConversationHandler(
+        entry_points=[CommandHandler('add', user_add_start)],
+        states={
+            ADD_HOSTEL: [CallbackQueryHandler(user_add_hostel_callback, pattern="^hostel_")]
+        },
+        fallbacks=[]
+    )
+    app.add_handler(user_add_conv)
+
+    # 📌 Roll Call System
+    roll_conv = ConversationHandler(
+        entry_points=[CommandHandler('rollcall', rollcall_start)],
+        states={
+            ROLL_PIN_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, rollcall_receive_pin)]
+        },
+        fallbacks=[CommandHandler('cancel', rollcall_cancel)]
+    )
+    app.add_handler(roll_conv)
+
+    # 📌 Skip Calculator
+    skip_conv = ConversationHandler(
+        entry_points=[CommandHandler('skip', skip_start)],
+        states={
+            SKIP_MAJOR: [CallbackQueryHandler(skip_process_major, pattern="^skipmaj_|^skip_cancel$")],
+            SKIP_SUBJECT: [CallbackQueryHandler(skip_process_subject, pattern="^skipsub_|^skip_cancel$")],
+            SKIP_MISSED: [MessageHandler(filters.TEXT & ~filters.COMMAND, skip_receive_missed)]
+        },
+        fallbacks=[CommandHandler('cancel', skip_cancel_cmd)]
+    )
+    app.add_handler(skip_conv)
+
+    # ================= STANDARD COMMANDS & HANDLERS =================
+    
     # Main Menu & Start Command
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CallbackQueryHandler(menu_handler, pattern="^(menu_|back_to_main)"))
 
-    # Fund Management Commands
+    # Legacy Fund Commands
     app.add_handler(CommandHandler("addfund", add_fund))
     app.add_handler(CommandHandler("clearfund", clear_fund))
     app.add_handler(CommandHandler("fund", check_fund))
@@ -127,20 +232,11 @@ def main():
     app.add_handler(CommandHandler('delegg', del_egg))
     app.add_handler(CommandHandler('notice999', notice999_cmd))
 
-    # 📌 Attendance & Roll Call System
+    # Attendance & Roll Call Dates
     app.add_handler(CommandHandler('attendance', start_attendance_cmd))
     app.add_handler(CommandHandler('dates', view_dates_cmd))
     app.add_handler(CallbackQueryHandler(close_attendance_action, pattern="^att_close_"))
     app.add_handler(CallbackQueryHandler(dates_callback_handler, pattern="^vdate_"))
-
-    roll_conv = ConversationHandler(
-        entry_points=[CommandHandler('rollcall', rollcall_start)],
-        states={
-            ROLL_PIN_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, rollcall_receive_pin)]
-        },
-        fallbacks=[CommandHandler('cancel', rollcall_cancel)]
-    )
-    app.add_handler(roll_conv)
 
     # Routing Management
     app.add_handler(CommandHandler('routes', route_cmd))
@@ -158,19 +254,8 @@ def main():
     # Catch-all for Custom Commands
     app.add_handler(MessageHandler(filters.COMMAND, handle_custom_cmd), group=2)
 
-    # 📌 Admin Approvers Management
     app.add_handler(CommandHandler("approvers", approvers_cmd))
     
-    approver_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(approvers_callback, pattern="^(addapp_|delapp_|cancel_app)")],
-        states={
-            APPROVER_ADD: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_approver_receive)]
-        },
-        fallbacks=[CommandHandler("cancel", cancel_conv)]
-    )
-    app.add_handler(approver_conv)
-
-    # ================= STANDARD COMMANDS =================
     app.add_handler(CommandHandler("import", import_members))
     app.add_handler(CommandHandler("mention", mention_all))
     app.add_handler(CommandHandler("addclass", add_class))
@@ -180,39 +265,39 @@ def main():
     # 📌 Weather Command
     app.add_handler(CommandHandler('weather', weather_cmd))
 
-    # 📌 Morning Auto Weather Alert (မနက် ၇:၃၀ တိုင်း လှမ်းပို့ရန် - တနင်္လာ မှ သောကြာ)
+    # 📌 Morning Auto Weather Alert
     mm_tz = timezone(timedelta(hours=6, minutes=30))
     alert_time = datetime.time(hour=7, minute=30, tzinfo=mm_tz)
     app.job_queue.run_daily(morning_weather_alert, time=alert_time, days=(0, 1, 2, 3, 4))
 
     # Task Management
-    app.add_handler(CommandHandler("addtask", add_task))
-    app.add_handler(CommandHandler(["tutorials", "tasks"], get_tasks))
+    app.add_handler(CommandHandler('tasks', show_tasks))
+    app.add_handler(CommandHandler('tutorials', show_tasks))
 
-    # 📌 75% Survival Calculator (Per Subject Auto Calculate)
-    skip_conv = ConversationHandler(
-        entry_points=[CommandHandler('skip', skip_start)],
-        states={
-            SKIP_MAJOR: [CallbackQueryHandler(skip_process_major, pattern="^skipmaj_|^skip_cancel$")],
-            SKIP_SUBJECT: [CallbackQueryHandler(skip_process_subject, pattern="^skipsub_|^skip_cancel$")],
-            SKIP_MISSED: [MessageHandler(filters.TEXT & ~filters.COMMAND, skip_receive_missed)]
-        },
-        fallbacks=[CommandHandler('cancel', skip_cancel_cmd)]
-    )
-    app.add_handler(skip_conv)
+    # 📌 Dummy Data & Inline Search
+    app.add_handler(CommandHandler('adddummy', add_dummy_data))
+    app.add_handler(InlineQueryHandler(inline_search))
 
-    # 📌 Nickname Setup Conversation
-    nickname_conv = ConversationHandler(
-        entry_points=[CommandHandler('nickname', nickname_start)],
-        states={
-            NICK_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, nickname_receive)],
-            NICK_CONFIRM: [CallbackQueryHandler(nickname_action, pattern="^savenick_")]
-        },
-        fallbacks=[CommandHandler('cancel', cancel_conv)]
-    )
-    app.add_handler(nickname_conv)
+    # 📌 Funds System
+    app.add_handler(CommandHandler('newfund', newfund_cmd))
+    app.add_handler(CommandHandler('pay', payfund_cmd))
+    app.add_handler(CommandHandler('delfund', delfund_cmd))
+    app.add_handler(CommandHandler('setphone', setphone_cmd))
+    app.add_handler(CommandHandler('undo', undo_cmd))
+    app.add_handler(CommandHandler("history", history_cmd))
 
-    # Timetable Handlers
+    app.add_handler(CommandHandler('ph', user_set_phone))
+
+    # 📌 Reports & Dashboards
+    app.add_handler(CommandHandler('list', list_cmd))
+    app.add_handler(CommandHandler('report', report_cmd))
+    app.add_handler(CommandHandler('vault', vault_cmd))
+    app.add_handler(CommandHandler('hostel', hostel_cmd))
+    app.add_handler(CommandHandler('export', export_cmd))
+    app.add_handler(CommandHandler('exportfund', export_fund_cmd))
+    app.add_handler(CommandHandler('remind', remind_cmd))
+
+    # 📌 Timetables
     MAJORS = ["it", "mc", "archi", "ep", "ec", "me", "civil"]
     for major in MAJORS:
         app.add_handler(CommandHandler(major, get_timetable_cmd))

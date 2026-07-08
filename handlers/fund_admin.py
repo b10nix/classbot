@@ -1,17 +1,21 @@
-import os
 import re
+import logging
 from datetime import datetime, timezone, timedelta
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 from database.db import get_db
 
-OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+# 🛡️ Centralized Auth ကို ခေါ်ယူအသုံးပြုခြင်း
+from utils.auth import is_super_admin
+
+logger = logging.getLogger(__name__)
 
 # ================= 💰 ရန်ပုံငွေ အသစ်ဖန်တီးရန် (/newfund) =================
 async def newfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """အသုံးပြုနည်း: /newfund <FundID> <TargetAmount> [Fund Name]"""
-    if update.effective_user.id != OWNER_ID: return
+    if not is_super_admin(update.effective_user.id): return
+    
     args = context.args
     if len(args) < 2:
         return await update.message.reply_text("⚠️ <b>အသုံးပြုနည်း:</b> <code>/newfund &lt;FundID&gt; &lt;TargetAmount&gt; [Fund Name]</code>", parse_mode=ParseMode.HTML)
@@ -35,7 +39,8 @@ async def newfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= 🗑 ရန်ပုံငွေ ဖျက်ရန် (/delfund) =================
 async def delfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """အသုံးပြုနည်း: /delfund <FundID>"""
-    if update.effective_user.id != OWNER_ID: return
+    if not is_super_admin(update.effective_user.id): return
+    
     if not context.args:
         return await update.message.reply_text("⚠️ <b>အသုံးပြုနည်း:</b> <code>/delfund &lt;FundID&gt;</code>", parse_mode=ParseMode.HTML)
         
@@ -44,44 +49,49 @@ async def delfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     res = await db.funds.delete_one({"fund_id": fund_id})
     
     if res.deleted_count:
-        await update.message.reply_text(f"🗑️ ရန်ပုံငွေ <code>{fund_id}</code> ကို ဖျက်လိုက်ပါပြီ။", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(f"🗑️ ရန်ပုံငွေ <code>{fund_id}</code> ကို ဖျက်လိုက်ပါပြီ。", parse_mode=ParseMode.HTML)
     else:
         await update.message.reply_text(f"⚠️ <code>{fund_id}</code> အမည်ဖြင့် ရန်ပုံငွေ မရှိပါ။", parse_mode=ParseMode.HTML)
 
 # ================= 💰 ငွေသွင်းစာရင်း မှတ်ရန် (/pay) =================
 async def payfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """အသုံးပြုနည်း: /pay <RollNo_Last_Digits> <FundID> <Amount>"""
-    if update.effective_user.id != OWNER_ID: return
+    if not is_super_admin(update.effective_user.id): return
     
     args = context.args
     if len(args) < 3:
-        await update.message.reply_text(
+        return await update.message.reply_text(
             "⚠️ <b>အသုံးပြုနည်း မှားယွင်းနေပါသည်။</b>\n<pre>/pay &lt;RollNo&gt; &lt;FundID&gt; &lt;Amount&gt;</pre>\n(ဥပမာ - <code>/pay 01 sports 2000</code>)", 
             parse_mode=ParseMode.HTML
         )
-        return
     
     try:
         roll_query = args[0]
         fund_id = args[1].lower()
         amount = int(args[2])
         
+        # 📌 Negative Amount ကာကွယ်ခြင်း (Bug Fix)
+        if amount <= 0:
+            return await update.message.reply_text("❌ <b>ငွေပမာဏ (Amount) သည် သုညထက် ကြီးရပါမည်။</b>", parse_mode=ParseMode.HTML)
+        
         db = get_db()
         regex_pattern = re.compile(re.escape(roll_query) + "$", re.IGNORECASE)
         student = await db.student_info.find_one({"roll_no": regex_pattern})
         
         if not student:
-            await update.message.reply_text(f"⚠️ <code>{roll_query}</code> ဖြင့်ဆုံးသော ကျောင်းသားကို ရှာမတွေ့ပါ။", parse_mode=ParseMode.HTML)
-            return
+            return await update.message.reply_text(f"⚠️ <code>{roll_query}</code> ဖြင့်ဆုံးသော ကျောင်းသားကို ရှာမတွေ့ပါ။", parse_mode=ParseMode.HTML)
             
         current_paid = student.get("paid_funds", {}).get(fund_id, 0)
         new_paid = current_paid + amount
         
-        # 📌 မြန်မာစံတော်ချိန်ဖြင့် ငွေသွင်းသည့် ရက်စွဲနှင့် အချိန်ကို မှတ်သားခြင်း
+        # 📌 ငွေသွင်းပေးလိုက်သော Admin ၏ အချက်အလက်ကို ယူခြင်း
+        admin_name = update.effective_user.first_name
+        admin_id = update.effective_user.id
+        admin_info = f"{admin_name} ({admin_id})"
+
         mm_tz = timezone(timedelta(hours=6, minutes=30))
         current_date = datetime.now(mm_tz).strftime("%d-%b-%Y %I:%M %p")
         
-        # သွင်းငွေနှင့် အချိန်မှတ်တမ်းကို DB သို့ ထည့်သွင်းခြင်း
         await db.student_info.update_one(
             {"_id": student["_id"]},
             {
@@ -93,7 +103,8 @@ async def payfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "payment_history": {
                         "fund_id": fund_id,
                         "amount": amount,
-                        "date": current_date
+                        "date": current_date,
+                        "received_by": admin_info # 👈 Admin ဘယ်သူလဲဆိုတာပါ မှတ်သားထားမည်
                     }
                 }
             }
@@ -113,15 +124,14 @@ async def payfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= ⏪ မှားထည့်မိသည်ကို ပြန်ရုပ်သိမ်းရန် (/undo) =================
 async def undo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """အသုံးပြုနည်း: /undo <RollNo_Last_Digits> <FundID>"""
-    if update.effective_user.id != OWNER_ID: return
+    if not is_super_admin(update.effective_user.id): return
 
     args = context.args
     if len(args) < 2:
-        await update.message.reply_text(
+        return await update.message.reply_text(
             "⚠️ <b>အသုံးပြုနည်း မှားယွင်းနေပါသည်။</b>\n<pre>/undo &lt;RollNo&gt; &lt;FundID&gt;</pre>\n(ဥပမာ - <code>/undo 01 sports</code>)", 
             parse_mode=ParseMode.HTML
         )
-        return
 
     roll_query = args[0]
     fund_id = args[1].lower()
@@ -134,28 +144,24 @@ async def undo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(f"⚠️ <code>{roll_query}</code> ဖြင့်ဆုံးသော ကျောင်းသားကို ရှာမတွေ့ပါ။", parse_mode=ParseMode.HTML)
 
     history = student.get("payment_history", [])
-    
-    # ထိုရန်ပုံငွေအတွက် နောက်ဆုံးသွင်းခဲ့သော မှတ်တမ်းများကို ရှာဖွေခြင်း
     fund_history = [h for h in history if h.get("fund_id") == fund_id]
 
     if not fund_history:
         return await update.message.reply_text(f"⚠️ <b>{fund_id}</b> အတွက် ပြန်ရုပ်သိမ်းစရာ ငွေသွင်းမှတ်တမ်း မရှိပါ။", parse_mode=ParseMode.HTML)
 
-    # နောက်ဆုံးသွင်းခဲ့သော ငွေပမာဏကို ဆွဲထုတ်ခြင်း
     last_tx = fund_history[-1]
     revert_amount = last_tx["amount"]
     tx_date = last_tx["date"]
 
     current_paid = student.get("paid_funds", {}).get(fund_id, 0)
-    new_paid = max(0, current_paid - revert_amount) # အနှုတ်မပြစေရန် ကာကွယ်ခြင်း
+    new_paid = max(0, current_paid - revert_amount)
 
-    # နောက်ဆုံးမှတ်တမ်းအား History ထဲမှ ဖယ်ရှားခြင်း
-    history.reverse()
-    for item in history:
+    # 📌 Backward Iteration ဖြင့် ပိုမို Safe ဖြစ်စွာ List ထဲမှ ဖယ်ရှားခြင်း (Bug Fix)
+    for i in range(len(history) - 1, -1, -1):
+        item = history[i]
         if item.get("fund_id") == fund_id and item.get("amount") == revert_amount:
-            history.remove(item)
+            history.pop(i)
             break
-    history.reverse()
 
     await db.student_info.update_one(
         {"_id": student["_id"]},
@@ -178,7 +184,8 @@ async def undo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= 📱 Phone & TG Username (Admin Manual Set) =================
 async def setphone_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """အသုံးပြုနည်း: /setphone <RollNo> <Phone>"""
-    if update.effective_user.id != OWNER_ID: return
+    if not is_super_admin(update.effective_user.id): return
+    
     if len(context.args) < 2: return await update.message.reply_text("⚠️ <b>အသုံးပြုနည်း:</b> <code>/setphone &lt;RollNo&gt; &lt;Phone&gt;</code>", parse_mode=ParseMode.HTML)
     
     roll_query = context.args[0]
@@ -186,14 +193,16 @@ async def setphone_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = get_db()
     regex_pattern = re.compile(re.escape(roll_query) + "$", re.IGNORECASE)
     res = await db.student_info.update_one({"roll_no": regex_pattern}, {"$set": {"phone": phone}})
+    
     if res.modified_count:
-        await update.message.reply_text("✅ ဖုန်းနံပါတ် ထည့်သွင်း/ပြင်ဆင်ပြီးပါပြီ။")
+        await update.message.reply_text("✅ ဖုန်းနံပါတ် ထည့်သွင်း/ပြင်ဆင်ပြီးပါပြီ。")
     else:
         await update.message.reply_text("❌ ကျောင်းသား ရှာမတွေ့ပါ။")
 
 async def settg_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """အသုံးပြုနည်း: /settg <RollNo> <Username>"""
-    if update.effective_user.id != OWNER_ID: return
+    if not is_super_admin(update.effective_user.id): return
+    
     if len(context.args) < 2: return await update.message.reply_text("⚠️ <b>အသုံးပြုနည်း:</b> <code>/settg &lt;RollNo&gt; &lt;Username&gt;</code>", parse_mode=ParseMode.HTML)
     
     roll_query = context.args[0]
@@ -201,7 +210,38 @@ async def settg_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = get_db()
     regex_pattern = re.compile(re.escape(roll_query) + "$", re.IGNORECASE)
     res = await db.student_info.update_one({"roll_no": regex_pattern}, {"$set": {"tg_username": username}})
+    
     if res.modified_count:
-        await update.message.reply_text("✅ Telegram Username ထည့်သွင်း/ပြင်ဆင်ပြီးပါပြီ။")
+        await update.message.reply_text("✅ Telegram Username ထည့်သွင်း/ပြင်ဆင်ပြီးပါပြီ。")
     else:
         await update.message.reply_text("❌ ကျောင်းသား ရှာမတွေ့ပါ။")
+
+# ================= 🔍 ငွေသွင်းမှတ်တမ်း အသေးစိတ်ကြည့်ရန် (/history) =================
+async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """အသုံးပြုနည်း: /history <RollNo>"""
+    if not is_super_admin(update.effective_user.id): return
+    
+    if not context.args:
+        return await update.message.reply_text("⚠️ <b>အသုံးပြုနည်း:</b> <code>/history &lt;RollNo&gt;</code>\n(ဥပမာ - <code>/history 01</code>)", parse_mode=ParseMode.HTML)
+    
+    roll_query = context.args[0]
+    db = get_db()
+    regex_pattern = re.compile(re.escape(roll_query) + "$", re.IGNORECASE)
+    student = await db.student_info.find_one({"roll_no": regex_pattern})
+    
+    if not student:
+        return await update.message.reply_text(f"⚠️ <code>{roll_query}</code> ဖြင့်ဆုံးသော ကျောင်းသားကို ရှာမတွေ့ပါ။", parse_mode=ParseMode.HTML)
+    
+    history = student.get("payment_history", [])
+    if not history:
+        return await update.message.reply_text(f"⚠️ <b>{student.get('name')}</b> တွင် ငွေသွင်းမှတ်တမ်း မရှိသေးပါ။", parse_mode=ParseMode.HTML)
+    
+    msg = f"📜 <b>Payment History for {student.get('name')}</b>\n━━━━━━━━━━━━━━━━━━\n"
+    
+    # 📌 မှတ်တမ်းများကို တစ်ခုချင်းစီ ထုတ်ပြခြင်း
+    for idx, h in enumerate(history, 1):
+        msg += f"{idx}. <b>{h.get('fund_id').upper()}</b> - {h.get('amount')} MMK\n"
+        msg += f"   📅 Date: {h.get('date')}\n"
+        msg += f"   👤 Received By: <code>{h.get('received_by', 'Unknown Admin')}</code>\n\n"
+        
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
