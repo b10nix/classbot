@@ -73,10 +73,14 @@ from handlers.admin_settings import (
 from handlers.social import (
     confess_start, confess_receive, confess_action,
     c1_start, c1_receive_msg, c1_receive_name, c1_action,
-    notice_start, notice_receive, notice_action, notice999_cmd,
+    post_start, post_receive, post_action, post999_cmd, 
     admin_approval_action,
-    nickname_start, nickname_receive, nickname_action
+    nickname_start, nickname_receive, nickname_action,
+    reply_start, reply_receive,
 )
+
+# handlers.social အုပ်စုထဲမှာ reply_start, reply_receive ကိုပါ ထည့်ခေါ်ပါ
+from handlers.social import reply_start, reply_receive
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
@@ -120,9 +124,12 @@ def main():
         states={
             State.C1_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, c1_receive_msg)],
             State.C1_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, c1_receive_name)],
-            State.C1_CONFIRM: [CallbackQueryHandler(c1_action, pattern="^(send|cancel)_c1")]
+            State.C1_CONFIRM: [CallbackQueryHandler(c1_action, pattern='^(send_c1|cancel_c1)')]
         },
-        fallbacks=[CommandHandler('cancel', cancel_conv)]
+        fallbacks=[
+            CommandHandler('cancel', cancel_conv),
+            CallbackQueryHandler(cancel_conv, pattern='^cancel_') # 📌 ဒီလိုင်းလေး တိုးသွားတာပါ
+        ]
     )
     app.add_handler(c1_conv)
 
@@ -131,23 +138,41 @@ def main():
         entry_points=[CommandHandler('confess1', confess_start)],
         states={
             State.CONFESS_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, confess_receive)],
-            State.CONFESS_CONFIRM: [CallbackQueryHandler(confess_action, pattern="^(send|cancel)_confess")]
+            State.CONFESS_CONFIRM: [CallbackQueryHandler(confess_action, pattern='^(send_confess|cancel_confess)')]
         },
-        fallbacks=[CommandHandler('cancel', cancel_conv)]
+        fallbacks=[
+            CommandHandler('cancel', cancel_conv),
+            CallbackQueryHandler(cancel_conv, pattern='^cancel_') # 📌 ဒီလိုင်းလေး တိုးသွားတာပါ
+        ]
     )
     app.add_handler(confess_conv)
 
-    # 📌 Notice System
-    notice_conv = ConversationHandler(
-        entry_points=[CommandHandler('notice', notice_start)],
+    # 📌 Post System
+    post_conv = ConversationHandler(
+        entry_points=[CommandHandler('post', post_start)],
         states={
-            State.NOTICE_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, notice_receive)],
-            State.NOTICE_CONFIRM: [CallbackQueryHandler(notice_action, pattern="^(send|cancel)_notice")]
+            State.POST_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, post_receive)],
+            State.POST_CONFIRM: [CallbackQueryHandler(post_action, pattern='^(send_post|cancel_post)')]
         },
-        fallbacks=[CommandHandler('cancel', cancel_conv)]
+        fallbacks=[
+            CommandHandler('cancel', cancel_conv),
+            CallbackQueryHandler(cancel_conv, pattern='^cancel_') # 📌 ဒီလိုင်းလေး တိုးသွားတာပါ
+        ]
     )
-    app.add_handler(notice_conv)
+    app.add_handler(post_conv)
 
+    reply_conv = ConversationHandler(
+        entry_points=[CommandHandler('start', reply_start)], 
+        states={
+            1: [MessageHandler(filters.TEXT & ~filters.COMMAND, reply_receive)],
+        },
+        fallbacks=[
+            CommandHandler('cancel', cancel_conv),
+            CallbackQueryHandler(cancel_conv, pattern='^cancel_')
+        ]
+    )
+    app.add_handler(reply_conv)
+    
     # 📌 Admin Approvers Management
     approver_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(approvers_callback, pattern="^(addapp_|delapp_|cancel_app)")],
@@ -162,10 +187,13 @@ def main():
     nickname_conv = ConversationHandler(
         entry_points=[CommandHandler('nickname', nickname_start)],
         states={
-            State.NICK_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, nickname_receive)],
-            State.NICK_CONFIRM: [CallbackQueryHandler(nickname_action, pattern="^savenick_")]
+            1: [MessageHandler(filters.TEXT & ~filters.COMMAND, nickname_receive)],
+            2: [CallbackQueryHandler(nickname_action, pattern='^savenick_')] # 📌 ဤနေရာမှ savenick ခလုတ်များကို ဖမ်းယူသည်
         },
-        fallbacks=[CommandHandler('cancel', cancel_conv)]
+        fallbacks=[
+            CommandHandler('cancel', cancel_conv),
+            CallbackQueryHandler(cancel_conv, pattern='^cancel_')
+        ]
     )
     app.add_handler(nickname_conv)
 
@@ -230,7 +258,7 @@ def main():
     app.add_handler(CommandHandler('delwifi', del_wifi))
     app.add_handler(CommandHandler('addegg', add_egg))
     app.add_handler(CommandHandler('delegg', del_egg))
-    app.add_handler(CommandHandler('notice999', notice999_cmd))
+    app.add_handler(CommandHandler("post999", post999_cmd))
 
     # Attendance & Roll Call Dates
     app.add_handler(CommandHandler('attendance', start_attendance_cmd))

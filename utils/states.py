@@ -5,9 +5,9 @@ class State(IntEnum):
     CONFESS_MSG = 0
     CONFESS_CONFIRM = 1
     
-    # Notice States
-    NOTICE_MSG = 2
-    NOTICE_CONFIRM = 3
+    # Post States
+    POST_MSG = 40
+    POST_CONFIRM = 41
     
     # Custom Confession (C1) States
     C1_MSG = 4
