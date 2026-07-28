@@ -31,7 +31,7 @@ async def confess_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     daily_ok, limit_count = await check_daily_limit(user_id)
     if not daily_ok:
-        warn = await update.message.reply_text(f"🚫 <b>DAILY LIMIT REACHED</b>\n\nယနေ့အတွက် သတ်မှတ်ထားသော ကန့်သတ်ချက် (<b>{limit_count}</b> ခု) ပြည့်သွားပါပြီ။", parse_mode=ParseMode.HTML)
+        warn = await update.message.reply_text(f"🚫 <b>DAILY LIMIT REACHED</b>\n\nယနေ့အတွက် သတ်မှတ်ထားသော ကန့်သတ်ချက် (<b>{limit_count}</b> ခု) ပြည့်သွားပါပြီ。", parse_mode=ParseMode.HTML)
         schedule_delete(context, update.effective_chat.id, warn.message_id, 15)
         return ConversationHandler.END
         
@@ -77,9 +77,27 @@ async def confess_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             post_id = str(uuid.uuid4())[:8]
             db = get_db()
             admin_msgs = []
+            log_msg_id = None
             
             if db is not None:
                 display_user = get_safe_user_link(update.effective_user) 
+                
+                # 📌 Log Group သို့ ပို့ဆောင်ခြင်း
+                if LOG_GROUP_ID != 0:
+                    log_txt = (
+                        f"🚨 <b>SYSTEM LOG | #Confession (Anonymous)</b>\n"
+                        f"🎯 <b>Target:</b> {target}\n"
+                        f"👤 <b>User:</b> {display_user} (ID: <code>{user_id}</code>)\n"
+                        f"🕒 <b>Time:</b> {get_mm_time()}\n"
+                        f"📝 <b>Content:</b>\n<pre>{html.escape(msg)}</pre>\n\n"
+                        f"⏳ <i>Pending Approval...</i>"
+                    )
+                    try:
+                        log_m = await context.bot.send_message(LOG_GROUP_ID, text=log_txt, parse_mode=ParseMode.HTML)
+                        log_msg_id = log_m.message_id
+                    except Exception as e:
+                        logger.error(f"Failed to send log to LOG_GROUP_ID: {e}")
+                
                 approvers = await db.approvers.find({}).to_list(length=None)
                 approver_ids = [a['user_id'] for a in approvers]
                 if OWNER_ID not in approver_ids: approver_ids.append(OWNER_ID)
@@ -96,21 +114,22 @@ async def confess_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await db.pending_posts.insert_one({
                     "post_id": post_id, "type": "confess_anon", "msg": msg, "target": target,
                     "sender_id": user_id, "sender_uname": context.user_data.get('sender_uname', ''), "sender_display": display_user, "time": get_mm_time(),
-                    "admin_msgs": admin_msgs
+                    "admin_msgs": admin_msgs, "log_msg_id": log_msg_id
                 })
                     
             await update_user_cooldown(user_id)
             await increment_daily_limit(user_id)
             
-            await context.bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text="<pre>✅ AI အကဲဖြတ်မှု အောင်မြင်ပါသည်။ Admin ထံသို့ ပို့ပြီးပါပြီ။</pre>", parse_mode=ParseMode.HTML)
-            schedule_delete(context, chat_id, msg_id, 7) # 📌 ၇ စက္ကန့်နေရင် Message ပျောက်သွားမည်
+            await context.bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text="<pre>✅ AI အကဲဖြတ်မှု အောင်မြင်ပါသည်။ Admin ထံသို့ ပို့ပြီးပါပြီ。</pre>", parse_mode=ParseMode.HTML)
+            schedule_delete(context, chat_id, msg_id, 7)
         else:
             await query.edit_message_text("<pre>🚫 ABORTED.</pre>", parse_mode=ParseMode.HTML)
             schedule_delete(context, query.message.chat_id, query.message.message_id, 3)
             
     except Exception as e:
         logger.error(f"Error in confess_action: {e}")
-        await query.edit_message_text("<pre>❌ System Error Occurred.</pre>", parse_mode=ParseMode.HTML)
+        await query.edit_message_text("<pre>❌ Error: System Issue</pre>", parse_mode=ParseMode.HTML)
+        schedule_delete(context, query.message.chat_id, query.message.message_id, 5)
         
     return ConversationHandler.END
 
@@ -175,9 +194,28 @@ async def c1_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             post_id = str(uuid.uuid4())[:8]
             db = get_db()
             admin_msgs = []
+            log_msg_id = None
             
             if db is not None:
                 display_user = get_safe_user_link(update.effective_user)
+                
+                # 📌 Log Group သို့ ပို့ဆောင်ခြင်း
+                if LOG_GROUP_ID != 0:
+                    log_txt = (
+                        f"🚨 <b>SYSTEM LOG | #Confession (Named)</b>\n"
+                        f"🎯 <b>Target:</b> {target}\n"
+                        f"👤 <b>User:</b> {display_user} (ID: <code>{user_id}</code>)\n"
+                        f"🎭 <b>Signature:</b> {html.escape(name)}\n"
+                        f"🕒 <b>Time:</b> {get_mm_time()}\n"
+                        f"📝 <b>Content:</b>\n<pre>{html.escape(msg)}</pre>\n\n"
+                        f"⏳ <i>Pending Approval...</i>"
+                    )
+                    try:
+                        log_m = await context.bot.send_message(LOG_GROUP_ID, text=log_txt, parse_mode=ParseMode.HTML)
+                        log_msg_id = log_m.message_id
+                    except Exception as e:
+                        logger.error(f"Failed to send log to LOG_GROUP_ID: {e}")
+                        
                 approvers = await db.approvers.find({}).to_list(length=None)
                 approver_ids = [a['user_id'] for a in approvers]
                 if OWNER_ID not in approver_ids: approver_ids.append(OWNER_ID)
@@ -194,21 +232,22 @@ async def c1_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await db.pending_posts.insert_one({
                     "post_id": post_id, "type": "confess_custom", "msg": msg, "target": target, "name": name,
                     "sender_id": user_id, "sender_uname": context.user_data.get('sender_uname', ''), "sender_display": display_user, "time": get_mm_time(),
-                    "admin_msgs": admin_msgs
+                    "admin_msgs": admin_msgs, "log_msg_id": log_msg_id
                 })
                     
             await update_user_cooldown(user_id)
             await increment_daily_limit(user_id)
             
-            await context.bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text="<pre>✅ AI အကဲဖြတ်မှု အောင်မြင်ပါသည်။ Admin ထံသို့ ပို့ပြီးပါပြီ။</pre>", parse_mode=ParseMode.HTML)
-            schedule_delete(context, chat_id, msg_id, 7) # 📌 ၇ စက္ကန့်နေရင် Message ပျောက်သွားမည်
+            await context.bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text="<pre>✅ AI အကဲဖြတ်မှု အောင်မြင်ပါသည်။ Admin ထံသို့ ပို့ပြီးပါပြီ。</pre>", parse_mode=ParseMode.HTML)
+            schedule_delete(context, chat_id, msg_id, 7)
         else:
             await query.edit_message_text("<pre>🚫 ABORTED.</pre>", parse_mode=ParseMode.HTML)
             schedule_delete(context, query.message.chat_id, query.message.message_id, 3)
             
     except Exception as e:
         logger.error(f"Error in c1_action: {e}")
-        await query.edit_message_text("<pre>❌ System Error Occurred.</pre>", parse_mode=ParseMode.HTML)
+        await query.edit_message_text("<pre>❌ Error: System Issue</pre>", parse_mode=ParseMode.HTML)
+        schedule_delete(context, query.message.chat_id, query.message.message_id, 5)
         
     return ConversationHandler.END
 
@@ -259,6 +298,22 @@ async def post_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db = get_db()
             published_targets = []
             
+            # 📌 Log Group သို့ ပို့ဆောင်ခြင်း (ဒီအပိုင်း မတော်တဆ ပြုတ်ကျန်ခဲ့တာပါ)
+            if LOG_GROUP_ID != 0:
+                display_user = get_safe_user_link(update.effective_user)
+                log_txt = (
+                    f"🚨 <b>SYSTEM LOG | 💬 Post (Direct)</b>\n"
+                    f"🎯 <b>Target:</b> {target}\n"
+                    f"👤 <b>User:</b> {display_user} (ID: <code>{update.effective_user.id}</code>)\n"
+                    f"🏷️ <b>Identity:</b> {identity}\n"
+                    f"🕒 <b>Time:</b> {get_mm_time()}\n"
+                    f"📝 <b>Content:</b>\n<pre>{html.escape(msg)}</pre>"
+                )
+                try:
+                    await context.bot.send_message(LOG_GROUP_ID, text=log_txt, parse_mode=ParseMode.HTML)
+                except Exception as e:
+                    logger.error(f"Failed to send direct post log to LOG_GROUP_ID: {e}")
+            
             for gid in target_ids:
                 try: 
                     reply_markup = InlineKeyboardMarkup([[
@@ -277,7 +332,7 @@ async def post_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
             await update_user_cooldown(update.effective_user.id)
             await query.edit_message_text("<pre>✅ POST DELIVERED SUCCESSFULLY.</pre>", parse_mode=ParseMode.HTML)
-            schedule_delete(context, query.message.chat_id, query.message.message_id, 7) # 📌 ၇ စက္ကန့်
+            schedule_delete(context, query.message.chat_id, query.message.message_id, 7)
         else:
             await query.edit_message_text("<pre>🚫 ABORTED.</pre>", parse_mode=ParseMode.HTML)
             schedule_delete(context, query.message.chat_id, query.message.message_id, 3)
@@ -285,68 +340,10 @@ async def post_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in post_action: {e}")
         await query.edit_message_text(f"<pre>❌ Error: System Issue</pre>", parse_mode=ParseMode.HTML)
+        schedule_delete(context, query.message.chat_id, query.message.message_id, 5)
         
     return ConversationHandler.END
 
 # ================= 👻 HIDDEN FEATURE: GHOST POST (/post999) =================
 async def post999_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type != 'private':
-        try: await update.message.delete()
-        except Exception: pass
-        warn = await update.message.reply_text("<pre>⚠️ DM Access Only.</pre>", parse_mode=ParseMode.HTML)
-        schedule_delete(context, update.effective_chat.id, warn.message_id, 5)
-        return
-
-    remain_sec = await check_user_cooldown(update.effective_user.id)
-    if remain_sec > 0:
-        await show_cooldown_warning(update, remain_sec, context)
-        return
-
-    text = update.message.text
-    parts = text.split(maxsplit=1)
-    
-    if len(parts) < 2:
-        await update.message.reply_text(
-            "⚠️ <b>အသုံးပြုနည်း မှားယွင်းနေပါသည်။</b>\n<pre>/post999 &lt;စာသား&gt;</pre>\n(ဥပမာ - `/post999 မနက်ဖြန် ကျောင်းပိတ်တယ်ဗျာ`)", 
-            parse_mode=ParseMode.HTML
-        )
-        return
-
-    msg = parts[1]
-    user_id = update.effective_user.id
-    
-    allowed_groups = await get_allowed_groups(user_id, context)
-    if not allowed_groups:
-        await update.message.reply_text("❌ သင်ပို့ခွင့်ရှိသော Group မရှိပါ။ (Group ထဲတွင် မရှိတော့၍ ဖြစ်နိုင်ပါသည်)")
-        return
-
-    try:
-        # 📌 Format အသစ်: Dash အတို
-        identity = await get_user_identity(user_id)
-        final_msg = f"💬 <b>POST</b>\n\n<pre>{html.escape(msg)}</pre>\n\n- {identity}{FOOTER}"
-        
-        for gid in allowed_groups:
-            try: 
-                await context.bot.send_message(chat_id=gid, text=final_msg, parse_mode=ParseMode.HTML)
-            except Exception: pass
-
-        if LOG_GROUP_ID != 0:
-            display_user = get_safe_user_link(update.effective_user)
-            log_txt = (
-                f"🚨 <b>SYSTEM LOG | 💬 Post999 (GHOST MODE)</b>\n"
-                f"🎯 <b>Target:</b> ALL ALLOWED GROUPS\n"
-                f"👤 <b>User:</b> {display_user} (ID: <code>{user_id}</code>)\n"
-                f"🏷️ <b>Identity:</b> {identity}\n"
-                f"🕒 <b>Time:</b> {get_mm_time()}\n"
-                f"📝 <b>Content:</b>\n<pre>{html.escape(msg)}</pre>"
-            )
-            try: 
-                await context.bot.send_message(LOG_GROUP_ID, text=log_txt, parse_mode=ParseMode.HTML)
-            except Exception: pass
-
-        await update_user_cooldown(user_id)
-        await update.message.reply_text("<pre>⚡ GHOST POST DELIVERED TO ALL GROUPS.</pre>", parse_mode=ParseMode.HTML)
-        
-    except Exception as e:
-        logger.error(f"Critical error in ghost post: {e}")
-        await update.message.reply_text("<pre>❌ Failed to execute ghost post.</pre>", parse_mode=ParseMode.HTML)
+    pass

@@ -22,7 +22,7 @@ from database.db import connect_db
 # ================= 📦 HANDLER IMPORTS =================
 from handlers.routing import route_cmd, route_action
 from handlers.menu import start, menu_handler
-from handlers.admin_tools import import_members, mention_all
+from handlers.admin_tools import import_members, mention_all, get_custom_emoji
 from handlers.funds import add_fund, clear_fund, check_fund
 from handlers.custom_cmds import add_custom_cmd, del_custom_cmd, handle_custom_cmd
 from handlers.weather import weather_cmd, morning_weather_alert
@@ -94,7 +94,9 @@ def main():
         return
 
     app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
-
+    # 📌 Custom Emoji ပါလာရင် ID ထုတ်ပေးမည့် Handler
+    app.add_handler(MessageHandler(filters.Entity("custom_emoji"), get_custom_emoji))
+    
     # 🚀 Background Jobs
     app.job_queue.run_repeating(class_reminder_job, interval=60, first=10)
     app.job_queue.run_repeating(tasks_reminder_job, interval=3600, first=10)
@@ -162,7 +164,7 @@ def main():
     app.add_handler(post_conv)
 
     reply_conv = ConversationHandler(
-        entry_points=[CommandHandler('start', reply_start)], 
+        entry_points=[CommandHandler('start', reply_start, filters.Regex(r'reply_'))], 
         states={
             1: [MessageHandler(filters.TEXT & ~filters.COMMAND, reply_receive)],
         },

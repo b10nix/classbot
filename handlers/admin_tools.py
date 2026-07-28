@@ -6,6 +6,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 from database.db import get_db
+from utils.auth import is_owner
 
 logger = logging.getLogger(__name__)
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
@@ -119,3 +120,20 @@ async def mention_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await asyncio.sleep(2) 
         except Exception as e:
             logger.error(f"Mention Error: {e}")
+
+# ================= 🌟 Premium Emoji ID ယူရန် (Admin Only) =================
+async def get_custom_emoji(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ❌ အဟောင်း: if not await is_owner(update):
+    # ✅ အသစ်: await ကို ဖြုတ်လိုက်ပါ (အောက်ပါအတိုင်း ပြင်ပါ)
+    if not is_owner(update): 
+        return
+        
+    if not update.message or not update.message.entities:
+        return
+
+    for entity in update.message.entities:
+        if entity.type == "custom_emoji":
+            await update.message.reply_text(
+                f"✅ <b>Custom Emoji ID ဖမ်းမိပါပြီ:</b>\n<code>{entity.custom_emoji_id}</code>",
+                parse_mode=ParseMode.HTML
+            )

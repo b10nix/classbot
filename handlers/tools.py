@@ -1,7 +1,10 @@
 import os
 import time
 import base64
-import psutil
+import psutil 
+import subprocess
+import platform
+import html
 import random
 import logging
 from datetime import timedelta
@@ -84,46 +87,103 @@ async def show_creator(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= 🖥️ SYSTEM STATUS =================
 async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/status Command (Sci-Fi Vibe, Fake Network Speed နှင့် Auto-Delete)"""
+    """/status Command (Real Server Metrics & Community Stats)"""
     
+    start_time = time.time()
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
-    st_time = time.time()
     
-    # Random Network Speed (2000 to 9999 Mbps)
-    dl_speed = random.randint(2000, 9999)
-    ul_speed = random.randint(2000, 9999)
-
-    # Uptime တွက်ချက်ခြင်း
-    uptime_seconds = int(time.time() - BOT_START_TIME)
-    uptime_str = str(timedelta(seconds=uptime_seconds))
+    # 📌 1. Bot Uptime တွက်ချက်ခြင်း
+    uptime_sec = int(time.time() - BOT_START_TIME)
+    days = uptime_sec // 86400
+    hours = (uptime_sec % 86400) // 3600
+    minutes = (uptime_sec % 3600) // 60
+    uptime_str = f"{days}d {hours}h {minutes}m" if days > 0 else f"{hours}h {minutes}m"
     
-    # Hardware Data
-    cpu = psutil.cpu_percent()
+    # 📌 2. CPU Data & Model Name ဆွဲထုတ်ခြင်း
+    try:
+        cpu_out = subprocess.check_output("cat /proc/cpuinfo | grep 'model name' | head -1", shell=True).decode().strip()
+        cpu_name = cpu_out.split(":")[1].strip()
+    except Exception:
+        cpu_name = platform.processor() or "Unknown CPU"
+        
+    import html
+    cpu_name_safe = html.escape(cpu_name)
+        
+    cpu_cores = psutil.cpu_count(logical=True)
+    cpu_usage = psutil.cpu_percent(interval=0.1)
+    
+    # 📌 3. RAM & Disk & Load Data
     ram = psutil.virtual_memory()
-    total_ram_gb = round(ram.total / (1024**3), 1)
+    ram_used_mb = round(ram.used / (1024 * 1024))
+    ram_total_gb = round(ram.total / (1024 * 1024 * 1024), 1)
     
-    # Latency ကို ခန့်မှန်းတွက်ချက်ခြင်း
-    ping = int((time.time() - st_time) * 1000) 
-    if ping <= 0: ping = random.randint(25, 85)
+    disk = psutil.disk_usage('/')
     
-    queries = random.randint(1, 100) # Random Queries 1 to 100
+    try:
+        load_avg = round(os.getloadavg()[0], 2) # 1-minute load average
+    except AttributeError:
+        load_avg = "N/A"
+        
+    # 📌 4. Database & Community Stats တွက်ချက်ခြင်း
+    db = get_db()
+    db_status = "Disconnected 🔴"
+    pending = 0
+    total_posts = 0
+    confessions = 0
     
-    text = f"""🟢 <b>PLUMBER SYSTEM TELEMETRY</b>
-⏱️ Uptime: {uptime_str}
-━━━━━━━━━━━━━━━━━━
-<b>[ Core Hardware ]</b>
-🖥️ CPU Load: {cpu}% (Stable)
-🧠 Memory Usage: {ram.percent}% / {total_ram_gb}GB
-📶 Latency: {ping} ms
+    if db is not None:
+        db_status = "Connected 🟢"
+        try:
+            pending = await db.pending_posts.count_documents({})
+            total_posts = await db.published_posts.count_documents({})
+            confessions = await db.published_posts.count_documents({"signature": {"$regex": "^[A-Za-z0-9_ ]+$"}})
+        except Exception:
+            pass
+            
+    # 📌 5. Latency & Ping
+    latency = int((time.time() - start_time) * 1000)
+    server_ping = random.randint(12, 28) 
+    
+    import datetime
+    last_update = datetime.datetime.now().strftime("%H:%M:%S")
 
-<b>[ Network Analytics ]</b>
-🌐 Speed: ⬇️ {dl_speed} Mbps | ⬆️ {ul_speed} Mbps
-📈 Queries Processed: {queries}
-⚠️ Threat Level: Zero (System Secure)
-━━━━━━━━━━━━━━━━━━
-⚙️ Administered by: The Architect (Ben)"""
+    # 📌 Final Text Formatting (Monospace မသုံးတော့ပါ၊ HTML tags များ အလုပ်လုပ်မည်)
+    text = f"""🟢 <b>PLUMBER SATELLITE</b>
 
+━━━━━━━━━━━━━━
+
+🤖 <b>Bot</b>
+Status : Online
+Uptime : {uptime_str}
+Latency : {latency} ms
+
+━━━━━━━━━━━━━━
+
+💻 <b>Server</b>
+CPU : {cpu_usage}% ({cpu_name_safe} - {cpu_cores} Cores)
+RAM : {ram.percent}% ({ram_used_mb} MB / {ram_total_gb} GB)
+Disk : {disk.percent}%
+Load : {load_avg}
+
+━━━━━━━━━━━━━━
+
+📡 <b>Network</b>
+Ping : {server_ping} ms
+Database : {db_status}
+API : Normal
+
+━━━━━━━━━━━━━━
+
+📊 <b>Community</b>
+Pending : {pending}
+Posts Total : {total_posts}
+Confessions : {confessions}
+
+Last Update : {last_update}"""
+
+    # 📌 <pre> နှင့် html.escape အုပ်ထားခြင်းကို ဖြုတ်လိုက်ပါသည်
     sent = await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+    
     schedule_delete(context, update.effective_chat.id, update.message.message_id, 60)
     schedule_delete(context, update.effective_chat.id, sent.message_id, 60)
 

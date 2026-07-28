@@ -1,3 +1,4 @@
+import asyncio
 import os
 import io
 import csv
@@ -125,36 +126,104 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg += f"🔴 <b>Unpaid ({len(unpaid_list)}):</b> {up_str if up_str else '-'}\n\n💰 <b>Total Collected:</b> {total:,} MMK"
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
-# ================= 🔔 ကြွေးတောင်း သတိပေးစာပို့ရန် (/remind) =================
+# ================= 🔔 ငွေမသွင်းရသေးသူများကို သတိပေးရန် (/remind) =================
 async def remind_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """အသုံးပြုနည်း: /remind <FundID>"""
     if not is_super_admin(update.effective_user.id): return
-    if not context.args: return await update.message.reply_text("⚠️ အသုံးပြုနည်း: /remind <FundID>")
     
+    if not context.args:
+        return await update.message.reply_text("⚠️ <b>အသုံးပြုနည်း:</b> <code>/remind &lt;FundID&gt;</code>\n(ဥပမာ - <code>/remind sports</code>)", parse_mode=ParseMode.HTML)
+        
     fund_id = context.args[0].lower()
     db = get_db()
     
     fund = await db.funds.find_one({"fund_id": fund_id})
-    if not fund: return await update.message.reply_text("⚠️ ထိုအမည်ဖြင့် ရန်ပုံငွေ မရှိပါ။")
-    
-    target = fund.get("target_amount", 0)
-    fund_name = fund.get("fund_name", fund_id)
-    sent_count = 0
-    
-    students = await db.student_info.find({}).to_list(length=None)
-    
-    for s in students:
-        paid = s.get("paid_funds", {}).get(fund_id, 0)
-        user_id = s.get("user_id")
+    if not fund:
+        return await update.message.reply_text(f"⚠️ <code>{fund_id}</code> အမည်ဖြင့် ရန်ပုံငွေ မရှိပါ။ အရင်ဆုံး /newfund ဖြင့် ဖန်တီးပါ။", parse_mode=ParseMode.HTML)
         
-        if paid < target and user_id:
-            text = f"🔔 <b>Class Fund Reminder</b>\n\nမင်္ဂလာပါ။ <b>{fund_name}</b> အတွက် ရန်ပုံငွေ ထည့်ဝင်ရန် ကျန်ရှိနေသေးသဖြင့် သတိပေးအပ်ပါသည်။\n\n💰 ပေးသွင်းရန်ကျန်ငွေ: <b>{target - paid:,} MMK</b>\n\n<i>(အတန်းကိုယ်စားလှယ်ထံသို့ အမြန်ဆုံး ဆက်သွယ်ပေးသွင်း주시ပါရန်)</i>"
-            try:
-                await context.bot.send_message(chat_id=user_id, text=text, parse_mode=ParseMode.HTML)
-                sent_count += 1
-            except Exception as e:
-                logger.error(f"Failed to send reminder to {user_id}: {e}")
+    target_amount = fund.get("target_amount", 0)
+    fund_name = fund.get("fund_name", fund_id)
+    
+    # 📌 2. ကျောင်းသား အားလုံးကို ဆွဲထုတ်ခြင်း
+    raw_students = await db.student_info.find({}).to_list(length=None)
+    if not raw_students:
+        return await update.message.reply_text("⚠️ Database တွင် ကျောင်းသားစာရင်း မရှိသေးပါ။", parse_mode=ParseMode.HTML)
+        
+    # 💡 [ SMART FILTER ] Duplicate/Ghost စာရင်းများကို Code ထဲတွင် Auto ရှင်းလင်းခြင်း
+    unique_students = {}
+    for st in raw_students:
+        r_no = st.get("roll_no")
+        if not r_no: 
+            continue
+            
+        existing = unique_students.get(r_no)
+        has_id = bool(st.get("user_id") or st.get("tg_id"))
+        existing_has_id = bool(existing.get("user_id") or existing.get("tg_id")) if existing else False
+        
+        # မရှိသေးရင် (သို့) အရင်ကောင်က ID မပါဘဲ အခုကောင်က ID ပါနေရင် အစားထိုးမည် (အကောင်အစစ်ကို ယူမည်)
+        if not existing or (not existing_has_id and has_id):
+            unique_students[r_no] = st
+            
+    students = list(unique_students.values())
+    
+    await update.message.reply_text(f"⏳ <b>{fund_name}</b> အတွက် သတိပေးစာ စတင်ပို့ဆောင်နေပါသည်...", parse_mode=ParseMode.HTML)
+    
+    success_count = 0
+    failed_students = []
+    
+    # 📌 3. တစ်ယောက်ချင်းစီကို စစ်ဆေး၍ DM ပို့ခြင်း (ယခုအခါ အတိအကျ ဖြစ်သွားပါပြီ)
+    for student in students:
+        paid = student.get("paid_funds", {}).get(fund_id, 0)
+        remaining = target_amount - paid
+        
+        # သွင်းရန်ကျန်နေသေးလျှင်
+        if remaining > 0:
+            user_id = student.get("user_id") or student.get("tg_id") 
+            roll_no = student.get("roll_no", "Unknown")
+            tg_uname = student.get("tg_username", "")
+            
+            if tg_uname:
+                display_fail = f"{roll_no} (@{tg_uname})"
+            else:
+                display_fail = f"{roll_no} (No Username)"
+
+            if not user_id:
+                failed_students.append(display_fail)
+                continue
                 
-    await update.message.reply_text(f"✅ စုစုပေါင်း ကျောင်းသား ({sent_count}) ဦးထံသို့ သတိပေးစာ ပို့ပြီးပါပြီ。")
+            remind_text = (
+                f"🔔 <b>FUND REMINDER (သတိပေးချက်)</b>\n━━━━━━━━━━━━━━━━━━\n"
+                f"👤 အမည်: <b>{student.get('name')}</b>\n"
+                f"🏷️ ရန်ပုံငွေ: <b>{fund_name}</b>\n\n"
+                f"🎯 သတ်မှတ်ထားသော ပမာဏ: {target_amount} MMK\n"
+                f"📥 သွင်းပြီးထားသော ပမာဏ: {paid} MMK\n"
+                f"⚠️ <b>ထပ်မံသွင်းရန် လိုအပ်ငွေ: {remaining} MMK</b>\n━━━━━━━━━━━━━━━━━━\n"
+                f"<i>ကျေးဇူးပြု၍ သတ်မှတ်ရက်အတွင်း အမြန်ဆုံး ပေးသွင်းပေးပါရန် မေတ္တာရပ်ခံအပ်ပါသည်။</i>"
+            )
+            
+            try:
+                await context.bot.send_message(chat_id=user_id, text=remind_text, parse_mode=ParseMode.HTML)
+                success_count += 1
+                await asyncio.sleep(0.5) 
+            except Exception as e:
+                logger.error(f"Failed to remind user {user_id}: {e}")
+                # ID ရှိလျက်နဲ့ ပို့မရသူ (Block ထားသူ) များကို မှတ်မည်
+                failed_students.append(display_fail) 
+                
+    # 📌 4. Report အပြီးသတ် ထုတ်ပြန်ခြင်း
+    failed_count = len(failed_students)
+    
+    summary_msg = (
+        f"✅ <b>သတိပေးခြင်း ပြီးဆုံးပါပြီ။</b>\n\n"
+        f"📩 အောင်မြင်စွာ ပို့ပြီးသူ: <b>{success_count}</b> ဦး\n"
+        f"❌ ပို့၍မရသူ စုစုပေါင်း: <b>{failed_count}</b> ဦး"
+    )
+    
+    if failed_count > 0:
+        fail_list_str = "\n".join([f"• {fs}" for fs in failed_students])
+        summary_msg += f"\n\n<b>[ ⚠️ ပို့၍မရသူများ စာရင်း ]</b>\n{fail_list_str}"
+        
+    await update.message.reply_text(summary_msg, parse_mode=ParseMode.HTML)
 
 # ================= 📂 စာရင်းအပြည့်အစုံ CSV ထုတ်ရန် (/export) =================
 async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
