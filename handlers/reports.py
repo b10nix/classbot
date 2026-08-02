@@ -62,26 +62,45 @@ async def hostel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= 🏦 ရန်ပုံငွေ အခြေအနေချုပ် (/vault) =================
 async def vault_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_super_admin(update.effective_user.id): return
+    if not is_super_admin(update.effective_user.id): return #[cite: 2]
     
-    db = get_db()
-    funds = await db.funds.find({}).to_list(length=None)
-    if not funds: return await update.message.reply_text("ရန်ပုံငွေ ခေါင်းစဉ်များ မရှိသေးပါ။")
+    db = get_db() #[cite: 2]
+    funds = await db.funds.find({}).to_list(length=None) #[cite: 2]
+    if not funds: return await update.message.reply_text("ရန်ပုံငွေ ခေါင်းစဉ်များ မရှိသေးပါ။") #[cite: 2]
     
-    students = await db.student_info.find({}).to_list(length=None)
-    msg = "🏦 <b>VAULT (ရန်ပုံငွေ အခြေအနေချုပ်)</b>\n━━━━━━━━━━━━━━\n"
+    students = await db.student_info.find({}).to_list(length=None) #[cite: 2]
     
-    grand_total = 0
-    for f in funds:
-        f_id = f.get("fund_id")
-        if not f_id: continue
-        f_name = f.get("fund_name", f_id)
-        total = sum(s.get("paid_funds", {}).get(f_id, 0) for s in students)
-        grand_total += total
-        msg += f"💰 <b>{f_name}</b>: {total:,} MMK\n"
+    active_msg = "🏦 <b>VAULT (လက်ရှိ ရန်ပုံငွေ အခြေအနေ)</b>\n━━━━━━━━━━━━━━\n"
+    archive_msg = "\n📦 <b>ဆရာမထံ အပ်နှံပြီးသော ရန်ပုံငွေများ (Archived)</b>\n━━━━━━━━━━━━━━\n"
+    
+    grand_total = 0 #[cite: 2]
+    archive_total = 0
+    has_archive = False
+    
+    for f in funds: #[cite: 2]
+        f_id = f.get("fund_id") #[cite: 2]
+        if not f_id: continue #[cite: 2]
         
-    msg += f"\n📊 <b>Grand Total: {grand_total:,} MMK</b>"
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+        f_name = f.get("fund_name", f_id) #[cite: 2]
+        total = sum(s.get("paid_funds", {}).get(f_id, 0) for s in students) #[cite: 2]
+        
+        # Archive ဖြစ်နေပါက အောက်ပိုင်းတွင် ပြမည်
+        if f.get("status") == "archived":
+            has_archive = True
+            archive_total += total
+            archive_msg += f"📦 <b>{f_name}</b>: {total:,} MMK\n"
+        else:
+            grand_total += total #[cite: 2]
+            active_msg += f"💰 <b>{f_name}</b>: {total:,} MMK\n" #[cite: 2]
+            
+    active_msg += f"\n📊 <b>လက်ရှိ Grand Total: {grand_total:,} MMK</b>" #[cite: 2]
+    
+    final_msg = active_msg
+    if has_archive:
+        archive_msg += f"\n📊 <b>အပ်နှံပြီး စုစုပေါင်း: {archive_total:,} MMK</b>"
+        final_msg += "\n" + archive_msg
+        
+    await update.message.reply_text(final_msg, parse_mode=ParseMode.HTML) #[cite: 2]
 
 # ================= 📊 ရန်ပုံငွေ အခြေအနေခွဲကြည့်ရန် (/report) =================
 async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):

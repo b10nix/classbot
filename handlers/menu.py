@@ -10,7 +10,6 @@ from utils.auth import is_super_admin
 logger = logging.getLogger(__name__)
 
 # ================= 🗑 Auto Delete စနစ် =================
-# (မှတ်ချက် - schedule_delete ကို utils/helper.py ထဲတွင် ရေးထားပြီးပါက ဤနေရာမှ ဖျက်၍ import လှမ်းခေါ်နိုင်ပါသည်)
 async def auto_delete_job(context: ContextTypes.DEFAULT_TYPE):
     try: await context.bot.delete_message(chat_id=context.job.chat_id, message_id=context.job.data)
     except: pass
@@ -21,7 +20,7 @@ def schedule_delete(context, chat_id, msg_id, delay=300):
 
 # ================= 🎛️ Main Menu Keyboard =================
 def get_main_menu_keyboard(user_id: int):
-    # အခြေခံ Menu များ (လူတိုင်းမြင်ရမည်)
+    # 👥 အခြေခံ Menu များ (လူတိုင်းမြင်ရမည်)
     keyboard = [
         [
             InlineKeyboardButton("🎓 Academic & Class", callback_data="menu_academic"),
@@ -29,12 +28,15 @@ def get_main_menu_keyboard(user_id: int):
         ],
         [
             InlineKeyboardButton("🛠️ Tools & Utility", callback_data="menu_tools"),
-            InlineKeyboardButton("💰 Funds & Info", callback_data="menu_funds")
+            InlineKeyboardButton("📋 Student Info", callback_data="menu_info") # 👈 Finance ကို ဖြုတ်ပြီး Info သီးသန့်ထားမည်
         ]
     ]
     
-    # 📌 Super Admin ဖြစ်မှသာ Admin Console ခလုတ် ပေါ်မည်
+    # 📌 Super Admin ဖြစ်မှသာ Finance နှင့် Admin Console ခလုတ်များ ပေါ်မည်
     if is_super_admin(user_id):
+        keyboard.append([
+            InlineKeyboardButton("💰 Finance & Ledger", callback_data="menu_finance") # 👈 Admin သီးသန့် Finance Menu အသစ်
+        ])
         keyboard.append([
             InlineKeyboardButton("📖 Commands Guide", callback_data="menu_examples"),
             InlineKeyboardButton("⚠️ Admin Console", callback_data="menu_admin")
@@ -92,7 +94,6 @@ Select Operation Protocol:"""
     
     await msg.edit_text(text=main_text, reply_markup=get_main_menu_keyboard(user_id), parse_mode=ParseMode.HTML)
     
-    # 👈 Menu နှင့် User စာကို မိနစ် ၅ မိနစ်အကြာတွင် အလိုလိုဖျက်မည်
     schedule_delete(context, chat_id, user_msg_id, 300)
     schedule_delete(context, chat_id, msg.message_id, 300)
 
@@ -157,22 +158,46 @@ Select Operation Protocol:"""
 /hex2bin &lt;Hex&gt;</pre>"""
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode=ParseMode.HTML)
 
-    elif query.data == "menu_funds":
+    elif query.data == "menu_info":
         await query.answer()
-        text = """<blockquote><b>💰 FUNDS & STUDENT INFO</b></blockquote>
+        text = """<blockquote><b>📋 STUDENT INFO</b></blockquote>
 <pre>📌 ကျောင်းသားများ လုပ်ဆောင်ရန်:
-/add - အချက်အလက် စာရင်းသွင်းရန်
-/ph - ဖုန်းနံပါတ် ထည့်သွင်းရန်
+/add &lt;RollNo&gt; &lt;Name&gt; - စာရင်းသွင်းရန်
+/ph &lt;Phone&gt; - ဖုန်းနံပါတ် ထည့်သွင်းရန်
 
 📌 Admin များ ရှာဖွေရန်:
 @bot_name (Inline Search) ဖြင့် 
-ခုံနံပါတ်/နာမည် ရိုက်ထည့်ရှာဖွေနိုင်သည်။
-
-[ Admin Only ]
-/list - စာရင်းသွင်းမှု အခြေအနေ
-/hostel - အဆောင်နေသူ သီးသန့်ကြည့်ရန်
-/vault - ရန်ပုံငွေ အခြေအနေချုပ်</pre>"""
+ခုံနံပါတ်/နာမည် ရိုက်ထည့်ရှာဖွေနိုင်သည်။</pre>"""
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode=ParseMode.HTML)
+
+    # 💰 [ Admin သီးသန့် Finance Menu ] 💰
+    elif query.data == "menu_finance":
+        if is_super_admin(user_id):
+            await query.answer()
+            text = """<blockquote><b>💰 FINANCE & LEDGER (ADMIN ONLY)</b></blockquote>
+<pre>📌 ရန်ပုံငွေ ဖန်တီး / ဖျက်သိမ်းရန်:
+/newfund &lt;FundID&gt; &lt;TargetAmount&gt; &lt;Manager&gt; [Name]
+/delfund &lt;FundID&gt;
+
+📌 ငွေသွင်း / ငွေထုတ် / ရုပ်သိမ်းရန်:
+/pay &lt;RollNo&gt; &lt;FundID&gt; &lt;Amount&gt;
+/spend &lt;Amount&gt; &lt;Reason&gt;
+/undo &lt;RollNo&gt; &lt;FundID&gt;
+
+📌 စာရင်းစစ် / အစီရင်ခံစာများ:
+/me - မိမိ၏ EC Dashboard ကြည့်ရန်
+/ecstat &lt;@username&gt; - အခြား EC စာရင်းကြည့်ရန်
+/vault - ရန်ပုံငွေ အခြေအနေချုပ်
+/report &lt;FundID&gt; - Fund အသေးစိတ်ကြည့်ရန်
+/export - CSV ဖြင့် စာရင်းထုတ်ရန်
+/exportfund &lt;FundID&gt; - Fund အတွက် CSV ထုတ်ရန်
+
+📌 အခြားလုပ်ဆောင်ချက်များ:
+/remind &lt;FundID&gt; - ငွေမသွင်းရသေးသူများကို သတိပေးရန်
+/archive_fund &lt;FundID&gt; - ဆရာမထံ ငွေအပ်နှံရန်</pre>"""
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode=ParseMode.HTML)
+        else:
+            await query.answer("⛔ Access Denied: Level 9 Clearance Required.", show_alert=True)
 
     elif query.data == "menu_examples":
         await query.answer()
@@ -195,11 +220,11 @@ Select Operation Protocol:"""
     elif query.data == "menu_admin":
         if is_super_admin(user_id):
             await query.answer()
+            # Finance Commands များကို ဤနေရာမှ ဖြုတ်လိုက်ပါပြီ
             text = """<blockquote><b>⚠️ ADMIN CONSOLE</b></blockquote>
-<pre>📌 ဘဏ္ဍာရေး စီမံခန့်ခွဲမှု:
-/newfund, /delfund
-/pay, /undo, /remind
-/report, /vault, /export
+<pre>📌 အထွေထွေ စီမံခန့်ခွဲမှု:
+/list - စာရင်းသွင်းမှု အခြေအနေ
+/hostel - အဆောင်နေသူ သီးသန့်ကြည့်ရန်
 
 📌 အတန်းချိန် နှင့် Tasks:
 /addclass, /delclass, /clearday

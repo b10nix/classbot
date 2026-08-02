@@ -13,28 +13,30 @@ logger = logging.getLogger(__name__)
 
 # ================= 💰 ရန်ပုံငွေ အသစ်ဖန်တီးရန် (/newfund) =================
 async def newfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """အသုံးပြုနည်း: /newfund <FundID> <TargetAmount> [Fund Name]"""
-    if not is_super_admin(update.effective_user.id): return
+    """အသုံးပြုနည်း: /newfund <FundID> <TargetAmount> <Manager> [Fund Name]"""
+    if not is_super_admin(update.effective_user.id): return #[cite: 1]
     
-    args = context.args
-    if len(args) < 2:
-        return await update.message.reply_text("⚠️ <b>အသုံးပြုနည်း:</b> <code>/newfund &lt;FundID&gt; &lt;TargetAmount&gt; [Fund Name]</code>", parse_mode=ParseMode.HTML)
+    args = context.args #[cite: 1]
+    if len(args) < 3: 
+        return await update.message.reply_text("⚠️ <b>အသုံးပြုနည်း:</b> <code>/newfund &lt;FundID&gt; &lt;TargetAmount&gt; &lt;Manager&gt; [Fund Name]</code>\n(ဥပမာ - <code>/newfund july 5000 ec လစဉ်ကြေး</code> သို့မဟုတ် <code>/newfund welcome 10000 ben Welcome Party</code>)", parse_mode=ParseMode.HTML)
     
-    fund_id = args[0].lower()
+    fund_id = args[0].lower() #[cite: 1]
     try:
-        target = int(args[1])
+        target = int(args[1]) #[cite: 1]
     except ValueError:
-        return await update.message.reply_text("❌ ငွေပမာဏ (TargetAmount) ကို ဂဏန်းဖြင့်သာ ထည့်ပါ။")
+        return await update.message.reply_text("❌ ငွေပမာဏ (TargetAmount) ကို ဂဏန်းဖြင့်သာ ထည့်ပါ။") #[cite: 1]
         
-    fund_name = " ".join(args[2:]) if len(args) > 2 else fund_id
+    manager = args[2].lower() # 'ec' သို့မဟုတ် ကောက်ခံမည့်သူ၏ username
+    fund_name = " ".join(args[3:]) if len(args) > 3 else fund_id #[cite: 1]
 
-    db = get_db()
-    await db.funds.update_one(
-        {"fund_id": fund_id},
-        {"$set": {"target_amount": target, "fund_name": fund_name}},
-        upsert=True
+    db = get_db() #[cite: 1]
+    # status: active နှင့် managed_by ကိုပါ DB တွင် သိမ်းဆည်းမည်
+    await db.funds.update_one( #[cite: 1]
+        {"fund_id": fund_id}, #[cite: 1]
+        {"$set": {"target_amount": target, "fund_name": fund_name, "managed_by": manager, "status": "active"}}, #[cite: 1]
+        upsert=True #[cite: 1]
     )
-    await update.message.reply_text(f"✅ <b>ရန်ပုံငွေအသစ် ဖန်တီး/ပြင်ဆင်ပြီးပါပြီ။</b>\n\n📌 ID: <code>{fund_id}</code>\n🎯 Target: {target} MMK\n🏷️ အမည်: {fund_name}", parse_mode=ParseMode.HTML)
+    await update.message.reply_text(f"✅ <b>ရန်ပုံငွေအသစ် ဖန်တီး/ပြင်ဆင်ပြီးပါပြီ။</b>\n\n📌 ID: <code>{fund_id}</code>\n🎯 Target: {target} MMK\n👤 Manager: <b>{manager}</b>\n🏷️ အမည်: {fund_name}", parse_mode=ParseMode.HTML) #[cite: 1]
 
 # ================= 🗑 ရန်ပုံငွေ ဖျက်ရန် (/delfund) =================
 async def delfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):

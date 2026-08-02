@@ -35,6 +35,18 @@ from handlers.reports import list_cmd, report_cmd, vault_cmd, hostel_cmd, export
 # 📌 User Registration Imports
 from handlers.user import user_add_start, user_add_hostel_callback, user_set_phone, ADD_HOSTEL
 
+# Fianance & Fund Management Imports
+from handlers.finance_tools import (
+    allocate_fund, 
+    spend_cmd,  
+    assign_ec_cmd, 
+    ec_me, nuke_funds_cmd,
+    ecstat_cmd,
+    archive_fund_cmd,
+    unarchive_fund_cmd, 
+    export_finance_report
+)
+
 # 📌 Academic & Timetable Imports
 from handlers.academic import (
     add_task_start, t_subject_callback, t_date_receive, t_content_receive, show_tasks,
@@ -317,6 +329,23 @@ def main():
     app.add_handler(CommandHandler("history", history_cmd))
 
     app.add_handler(CommandHandler('ph', user_set_phone))
+
+    # ================= 💰 ငွေစာရင်းနှင့် EC စီမံခန့်ခွဲမှု Commands =================
+    
+    # Super Admin သုံးရန်
+    app.add_handler(CommandHandler("allocate", allocate_fund))
+    app.add_handler(CommandHandler("ecstat", ecstat_cmd))
+    app.add_handler(CommandHandler("export_finance", export_finance_report))
+    
+    # Admin များသုံးရန် (EC Assign နှင့် Archive)
+    app.add_handler(CommandHandler("assign_ec", assign_ec_cmd))
+    app.add_handler(CommandHandler("archive_fund", archive_fund_cmd))
+    app.add_handler(CommandHandler("unarchive_fund", unarchive_fund_cmd))
+    
+    # EC များ ကိုယ်တိုင်သုံးရန်
+    app.add_handler(CommandHandler("spend", spend_cmd))
+    app.add_handler(CommandHandler("me", ec_me))
+    app.add_handler(CommandHandler("nuke", nuke_funds_cmd))
 
     # 📌 Reports & Dashboards
     app.add_handler(CommandHandler('list', list_cmd))
