@@ -7,7 +7,7 @@ from database.db import get_db
 
 logger = logging.getLogger(__name__)
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
-MAJORS = ["it", "mc", "archi", "ep", "ec", "me", "civil"]
+MAJORS = ["it", "mc", "archi", "ep", "ec", "mech", "civil"]
 
 def get_class_groups():
     group_id_str = os.getenv("CLASS_GROUP_ID", "0")

@@ -11,6 +11,7 @@ from utils.constants import CLASS_GROUP_IDS, VIP_USERS, RANDOM_EMOJIS
 from utils.auth import is_super_admin
 
 logger = logging.getLogger(__name__)
+GROUP_NAME_CACHE = {}
 
 # ================= 🛡️ CANCEL CONVERSATION =================
 async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -25,18 +26,60 @@ async def cancel_conv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ================= 👤 USER INFO HELPERS =================
-def get_safe_user_link(user) -> str:
-    if not user: return "Unknown User"
-    user_id = user.id
-    raw_first_name = user.first_name if user.first_name else f"User {user_id}"
-    safe_first_name = html.escape(raw_first_name)
-    user_link = f'<a href="tg://user?id={user_id}">{safe_first_name}</a>'
-    
-    if user.username:
-        return f"{user_link} (@{user.username})"
-    else:
-        return f"{user_link} (No Username)"
+def get_safe_user_link(user_entity) -> str:
+    """
+    Universal User Link Resolver
+    Telegram User Object (`update.effective_user`) နဲ့ Database Dict Snapshot
+    နှစ်မျိုးလုံးက Username နဲ့ ID တွေကို အလိုအလျောက် သီးခြားခွဲထုတ်ဖတ်ပေးမည်။
+    """
+    if not user_entity:
+        return "Unknown User"
 
+    user_id = None
+    first_name = "User Profile"
+    username = None
+
+    # 📌 1. Confession တင်ချိန် (Telegram User Object)
+    if hasattr(user_entity, "id"):
+        user_id = user_entity.id
+        first_name = user_entity.first_name or f"User {user_id}"
+        username = user_entity.username
+
+    # 📌 2. Approve / Reject လုပ်ချိန် (Database Dict Snapshot)
+    elif isinstance(user_entity, dict):
+        user_id = (
+            user_entity.get("sender_id") 
+            or user_entity.get("tg_id") 
+            or user_entity.get("user_id")
+        )
+        first_name = (
+            user_entity.get("sender_first_name") 
+            or user_entity.get("first_name") 
+            or user_entity.get("name") 
+            or f"User {user_id or ''}"
+        )
+        username = (
+            user_entity.get("sender_username") 
+            or user_entity.get("tg_username") 
+            or user_entity.get("username")
+        )
+
+    safe_first_name = html.escape(str(first_name))
+
+    # 📌 3. Username ရှိပါက https://t.me/ Link + Username ထုတ်ပေးမည်
+    if username and str(username) != "None":
+        clean_username = str(username).lstrip("@").strip()
+        if clean_username and clean_username.lower() != "unknown":
+            safe_username = html.escape(clean_username)
+            return f'<a href="https://t.me/{safe_username}">{safe_first_name}</a> (@{safe_username})'
+
+    # 📌 4. Username မရှိပါက tg://user?id= Deep Link ထုတ်ပေးမည်
+    if user_id is not None:
+        return f'<a href="tg://user?id={user_id}">{safe_first_name}</a> (No Username)'
+
+    return safe_first_name
+
+#================== 👤 USER IDENTITY HELPERS =================
 async def get_user_identity(user_id: int) -> str:
     """User ၏ Emoji (Permanent Identity) ကို ဆွဲထုတ်ပေးရန်"""
     db = get_db()
@@ -100,3 +143,18 @@ async def build_target_keyboard(user_id: int, context: ContextTypes.DEFAULT_TYPE
         
     keyboard.append([InlineKeyboardButton("❌ ABORT", callback_data=prefix_cancel)])
     return InlineKeyboardMarkup(keyboard)
+
+# ================= GROUP NAME HELPERS =================
+async def get_group_name(bot, group_id: int) -> str:
+  """Group ID မှ Group Name ကို အလိုအလျောက် ဆွဲထုတ်ပေးမည့် Function"""
+  if group_id in GROUP_NAME_CACHE:
+    return GROUP_NAME_CACHE[group_id]
+
+  try:
+    chat = await bot.get_chat(group_id)
+    group_name = chat.title or str(group_id)
+    GROUP_NAME_CACHE[group_id] = group_name  # Cache ထဲ မှတ်ထားမည်
+    return group_name
+  except Exception as e:
+    # တကယ်လို့ Group ထဲမှ Bot ထွက်သွားလျှင် သို့မဟုတ် Error တက်လျှင် ID ကိုပဲ ပြမည်
+    return str(group_id)

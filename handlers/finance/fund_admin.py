@@ -8,35 +8,47 @@ from database.db import get_db
 
 # 🛡️ Centralized Auth ကို ခေါ်ယူအသုံးပြုခြင်း
 from utils.auth import is_super_admin
+from utils.constants import EC_MAP
 
 logger = logging.getLogger(__name__)
 
 # ================= 💰 ရန်ပုံငွေ အသစ်ဖန်တီးရန် (/newfund) =================
 async def newfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """အသုံးပြုနည်း: /newfund <FundID> <TargetAmount> <Manager> [Fund Name]"""
-    if not is_super_admin(update.effective_user.id): return #[cite: 1]
+    if not is_super_admin(update.effective_user.id): return 
     
-    args = context.args #[cite: 1]
+    args = context.args 
     if len(args) < 3: 
-        return await update.message.reply_text("⚠️ <b>အသုံးပြုနည်း:</b> <code>/newfund &lt;FundID&gt; &lt;TargetAmount&gt; &lt;Manager&gt; [Fund Name]</code>\n(ဥပမာ - <code>/newfund july 5000 ec လစဉ်ကြေး</code> သို့မဟုတ် <code>/newfund welcome 10000 ben Welcome Party</code>)", parse_mode=ParseMode.HTML)
+        return await update.message.reply_text(
+            "⚠️ <b>အသုံးပြုနည်း:</b> <code>/newfund &lt;FundID&gt; &lt;TargetAmount&gt; &lt;Manager&gt; [Fund Name]</code>\n"
+            "(ဥပမာ - <code>/newfund july 5000 ec လစဉ်ကြေး</code> သို့မဟုတ် <code>/newfund welcome 10000 ben Welcome Party</code>)", 
+            parse_mode=ParseMode.HTML
+        )
     
-    fund_id = args[0].lower() #[cite: 1]
+    fund_id = args[0].lower() 
     try:
-        target = int(args[1]) #[cite: 1]
+        target = int(args[1]) 
     except ValueError:
-        return await update.message.reply_text("❌ ငွေပမာဏ (TargetAmount) ကို ဂဏန်းဖြင့်သာ ထည့်ပါ။") #[cite: 1]
+        return await update.message.reply_text("❌ ငွေပမာဏ (TargetAmount) ကို ဂဏန်းဖြင့်သာ ထည့်ပါ။") 
         
     manager = args[2].lower() # 'ec' သို့မဟုတ် ကောက်ခံမည့်သူ၏ username
-    fund_name = " ".join(args[3:]) if len(args) > 3 else fund_id #[cite: 1]
+    fund_name = " ".join(args[3:]) if len(args) > 3 else fund_id 
 
-    db = get_db() #[cite: 1]
+    db = get_db() 
     # status: active နှင့် managed_by ကိုပါ DB တွင် သိမ်းဆည်းမည်
-    await db.funds.update_one( #[cite: 1]
-        {"fund_id": fund_id}, #[cite: 1]
-        {"$set": {"target_amount": target, "fund_name": fund_name, "managed_by": manager, "status": "active"}}, #[cite: 1]
-        upsert=True #[cite: 1]
+    await db.funds.update_one( 
+        {"fund_id": fund_id}, 
+        {"$set": {"target_amount": target, "fund_name": fund_name, "managed_by": manager, "status": "active"}}, 
+        upsert=True 
     )
-    await update.message.reply_text(f"✅ <b>ရန်ပုံငွေအသစ် ဖန်တီး/ပြင်ဆင်ပြီးပါပြီ။</b>\n\n📌 ID: <code>{fund_id}</code>\n🎯 Target: {target} MMK\n👤 Manager: <b>{manager}</b>\n🏷️ အမည်: {fund_name}", parse_mode=ParseMode.HTML) #[cite: 1]
+    await update.message.reply_text(
+        f"✅ <b>ရန်ပုံငွေအသစ် ဖန်တီး/ပြင်ဆင်ပြီးပါပြီ။</b>\n\n"
+        f"📌 ID: <code>{fund_id}</code>\n"
+        f"🎯 Target: {target} MMK\n"
+        f"👤 Manager: <b>{manager}</b>\n"
+        f"🏷️ အမည်: {fund_name}", 
+        parse_mode=ParseMode.HTML
+    ) 
 
 # ================= 🗑 ရန်ပုံငွေ ဖျက်ရန် (/delfund) =================
 async def delfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -63,7 +75,7 @@ async def payfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if len(args) < 3:
         return await update.message.reply_text(
-            "⚠️ <b>အသုံးပြုနည်း မှားယွင်းနေပါသည်။</b>\n<pre>/pay &lt;RollNo&gt; &lt;FundID&gt; &lt;Amount&gt;</pre>\n(ဥပမာ - <code>/pay 01 sports 2000</code>)", 
+            "⚠️ <b>အသုံးပြုနည်း မှားယွင်းနေပါသည်။</b>\n<pre>/pay &lt;RollNo&gt; &lt;FundID&gt; &lt;Amount&gt;</pre>", 
             parse_mode=ParseMode.HTML
         )
     
@@ -72,9 +84,8 @@ async def payfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fund_id = args[1].lower()
         amount = int(args[2])
         
-        # 📌 Negative Amount ကာကွယ်ခြင်း (Bug Fix)
         if amount <= 0:
-            return await update.message.reply_text("❌ <b>ငွေပမာဏ (Amount) သည် သုညထက် ကြီးရပါမည်။</b>", parse_mode=ParseMode.HTML)
+            return await update.message.reply_text("❌ <b>ငွေပမာဏသည် သုညထက် ကြီးရပါမည်။</b>", parse_mode=ParseMode.HTML)
         
         db = get_db()
         regex_pattern = re.compile(re.escape(roll_query) + "$", re.IGNORECASE)
@@ -83,22 +94,56 @@ async def payfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not student:
             return await update.message.reply_text(f"⚠️ <code>{roll_query}</code> ဖြင့်ဆုံးသော ကျောင်းသားကို ရှာမတွေ့ပါ။", parse_mode=ParseMode.HTML)
             
-        current_paid = student.get("paid_funds", {}).get(fund_id, 0)
+        # 📌 1. လက်ရှိ Data ကို ဖတ်ခြင်း နှင့် Migration Logic
+        current_fund_data = student.get("paid_funds", {}).get(fund_id, 0)
+        current_paid = 0
+        collector_breakdown = {}
+
+        if isinstance(current_fund_data, dict):
+            current_paid = current_fund_data.get("amount", 0)
+            old_collected_by = current_fund_data.get("collected_by", "ec")
+            
+            # String အဟောင်း ဖြစ်နေလျှင် Dict သို့ ပြောင်းမည်
+            if isinstance(old_collected_by, str):
+                collector_breakdown[old_collected_by] = current_paid
+            elif isinstance(old_collected_by, dict):
+                collector_breakdown = old_collected_by.copy()
+        
+        elif isinstance(current_fund_data, (int, float)):
+            current_paid = current_fund_data
+            if current_paid > 0:
+                collector_breakdown[student.get("assigned_ec", "ec")] = current_paid
+            
         new_paid = current_paid + amount
         
-        # 📌 ငွေသွင်းပေးလိုက်သော Admin ၏ အချက်အလက်ကို ယူခြင်း
-        admin_name = update.effective_user.first_name
+        # 📌 2. Admin ၏ Nickname ရှာဖွေခြင်း
         admin_id = update.effective_user.id
-        admin_info = f"{admin_name} ({admin_id})"
+        admin_name = update.effective_user.first_name
+        admin_nick = "ec"
+        try:
+            for nick, tg_id in EC_MAP.items():
+                if tg_id == admin_id:
+                    admin_nick = nick.lower()
+                    break
+        except Exception: pass
 
+        # 📌 3. Collector Breakdown ထဲသို့ ယခု Admin ၏ ငွေကို ပေါင်းထည့်ခြင်း
+        collector_breakdown[admin_nick] = collector_breakdown.get(admin_nick, 0) + amount
+
+        admin_info = f"{admin_name} ({admin_id})"
         mm_tz = timezone(timedelta(hours=6, minutes=30))
         current_date = datetime.now(mm_tz).strftime("%d-%b-%Y %I:%M %p")
         
+        # 📌 4. Database သို့ သိမ်းဆည်းခြင်း
         await db.student_info.update_one(
             {"_id": student["_id"]},
             {
                 "$set": {
-                    f"paid_funds.{fund_id}": new_paid,
+                    f"paid_funds.{fund_id}": {
+                        "amount": new_paid,
+                        "collected_by": collector_breakdown, # Dictionary ဖြင့် တိကျစွာ သိမ်းမည်
+                        "last_date": current_date
+                    },
                     "last_payment_date": current_date
                 },
                 "$push": {
@@ -106,7 +151,7 @@ async def payfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "fund_id": fund_id,
                         "amount": amount,
                         "date": current_date,
-                        "received_by": admin_info # 👈 Admin ဘယ်သူလဲဆိုတာပါ မှတ်သားထားမည်
+                        "received_by": admin_info 
                     }
                 }
             }
@@ -115,8 +160,8 @@ async def payfund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"✅ <b>စာရင်းသွင်းပြီးပါပြီ။</b>\n\n"
             f"👤 ကျောင်းသား: {student.get('name')} ({student.get('roll_no')})\n"
-            f"📥 ယခုသွင်းငွေ: {amount} MMK\n"
-            f"💰 စုစုပေါင်း သွင်းထားငွေ: {new_paid} MMK\n"
+            f"📥 ယခုသွင်းငွေ: {amount:,} MMK\n"
+            f"💰 စုစုပေါင်း သွင်းထားငွေ: {new_paid:,} MMK\n"
             f"🕒 အချိန်: <code>{current_date}</code>", 
             parse_mode=ParseMode.HTML
         )
@@ -155,10 +200,25 @@ async def undo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     revert_amount = last_tx["amount"]
     tx_date = last_tx["date"]
 
-    current_paid = student.get("paid_funds", {}).get(fund_id, 0)
+    # 📌 [BUG FIX] dict နှင့် int/float ရောထွေးမှုကို စစ်ဆေးခြင်း
+    current_fund_data = student.get("paid_funds", {}).get(fund_id, 0)
+    current_paid = 0
+
+    if isinstance(current_fund_data, dict):
+        current_paid = current_fund_data.get("amount", 0)
+    elif isinstance(current_fund_data, (int, float)):
+        current_paid = current_fund_data
+
     new_paid = max(0, current_paid - revert_amount)
 
-    # 📌 Backward Iteration ဖြင့် ပိုမို Safe ဖြစ်စွာ List ထဲမှ ဖယ်ရှားခြင်း (Bug Fix)
+    # Dictionary ကို ဆက်လက်ထိန်းသိမ်းရန် (Preserve)
+    if isinstance(current_fund_data, dict):
+        set_value = current_fund_data.copy()
+        set_value["amount"] = new_paid
+    else:
+        set_value = new_paid
+
+    # 📌 Backward Iteration ဖြင့် ပိုမို Safe ဖြစ်စွာ List ထဲမှ ဖယ်ရှားခြင်း
     for i in range(len(history) - 1, -1, -1):
         item = history[i]
         if item.get("fund_id") == fund_id and item.get("amount") == revert_amount:
@@ -169,7 +229,7 @@ async def undo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         {"_id": student["_id"]},
         {
             "$set": {
-                f"paid_funds.{fund_id}": new_paid,
+                f"paid_funds.{fund_id}": set_value,
                 "payment_history": history
             }
         }
@@ -178,8 +238,8 @@ async def undo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"⏪ <b>လုပ်ဆောင်ချက် ပြန်လည်ရုပ်သိမ်းပြီးပါပြီ (Undo Successful)</b>\n━━━━━━━━━━━━━━━━━━\n"
         f"👤 ကျောင်းသား: {student.get('name')} ({student.get('roll_no')})\n"
-        f"🗑 ဖျက်လိုက်သော သွင်းငွေ: <b>{revert_amount} MMK</b> <i>(သွင်းခဲ့သည့်အချိန်: {tx_date})</i>\n"
-        f"💰 ယခု ကျန်ရှိငွေ: <b>{new_paid} MMK</b>",
+        f"🗑 ဖျက်လိုက်သော သွင်းငွေ: <b>{revert_amount:,} MMK</b> <i>(သွင်းခဲ့သည့်အချိန်: {tx_date})</i>\n"
+        f"💰 ယခု ကျန်ရှိငွေ: <b>{new_paid:,} MMK</b>",
         parse_mode=ParseMode.HTML
     )
 
@@ -242,9 +302,8 @@ async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # 📌 မှတ်တမ်းများကို တစ်ခုချင်းစီ ထုတ်ပြခြင်း
     for idx, h in enumerate(history, 1):
-        msg += f"{idx}. <b>{h.get('fund_id').upper()}</b> - {h.get('amount')} MMK\n"
+        msg += f"{idx}. <b>{h.get('fund_id').upper()}</b> - {h.get('amount'):,} MMK\n"
         msg += f"   📅 Date: {h.get('date')}\n"
         msg += f"   👤 Received By: <code>{h.get('received_by', 'Unknown Admin')}</code>\n\n"
         
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
-

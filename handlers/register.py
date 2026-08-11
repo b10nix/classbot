@@ -24,7 +24,7 @@ from handlers.student.user import user_add_start, user_add_hostel_callback, user
 # Fianance & Fund Management Imports
 from handlers.finance.finance_tools import (
     allocate_fund, spend_cmd, assign_ec_cmd, ec_me, nuke_funds_cmd,
-    ecstat_cmd, archive_fund_cmd, unarchive_fund_cmd, export_finance_report
+    ecstat_cmd, archive_fund_cmd, unarchive_fund_cmd, export_finance_report, fundstat_cmd
 )
 
 # 📌 Academic & Timetable Imports
@@ -265,6 +265,7 @@ def register_all_handlers(app):
     app.add_handler(CommandHandler("assign_ec", assign_ec_cmd))
     app.add_handler(CommandHandler("archive_fund", archive_fund_cmd))
     app.add_handler(CommandHandler("unarchive_fund", unarchive_fund_cmd))
+    app.add_handler(CommandHandler("fundstat", fundstat_cmd))
     
     app.add_handler(CommandHandler("spend", spend_cmd))
     app.add_handler(CommandHandler("me", ec_me))
@@ -278,7 +279,7 @@ def register_all_handlers(app):
     app.add_handler(CommandHandler('exportfund', export_fund_cmd))
     app.add_handler(CommandHandler('remind', remind_cmd))
 
-    MAJORS = ["it", "mc", "archi", "ep", "ec", "me", "civil"]
+    MAJORS = ["it", "mc", "archi", "ep", "ec", "mech", "civil"]
     for major in MAJORS:
         app.add_handler(CommandHandler(major, get_timetable_cmd))
 

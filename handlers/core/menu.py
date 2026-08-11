@@ -118,7 +118,7 @@ Select Operation Protocol:"""
         await query.answer()
         text = """<blockquote><b>🎓 ACADEMIC & CLASS CORE</b></blockquote>
 <pre>📌 အချိန်ဇယား ကြည့်ရန်:
-/it, /ec, /civil, /ep, /me, /mc, /archi
+/it, /ec, /civil, /ep, /mech, /mc, /archi
 
 📌 တာဝန်နှင့် စာမေးပွဲများ ကြည့်ရန်:
 /tasks (သို့) /tutorials
@@ -191,6 +191,9 @@ Select Operation Protocol:"""
 /report &lt;FundID&gt; - Fund အသေးစိတ်ကြည့်ရန်
 /export - CSV ဖြင့် စာရင်းထုတ်ရန်
 /exportfund &lt;FundID&gt; - Fund အတွက် CSV ထုတ်ရန်
+/ecstat &lt;username&gt; - EC အခြေအနေကြည့်ရန်
+/fundstat &lt;FundID&gt; - Fund အခြေအနေကြည့်ရန်
+
 
 📌 အခြားလုပ်ဆောင်ချက်များ:
 /remind &lt;FundID&gt; - ငွေမသွင်းရသေးသူများကို သတိပေးရန်

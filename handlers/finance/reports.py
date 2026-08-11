@@ -16,25 +16,38 @@ logger = logging.getLogger(__name__)
 
 def is_super_admin(user_id: int) -> bool:
     owner_id = int(os.getenv("OWNER_ID", "0"))
-    if user_id == owner_id: return True
+    if user_id == owner_id: 
+        return True
     sa_str = os.getenv("SUPER_ADMINS", "")
     if sa_str:
         try:
             return user_id in [int(x.strip()) for x in sa_str.split(",") if x.strip()]
-        except ValueError: pass
+        except ValueError: 
+            pass
     return False
+
+def extract_paid_amount(paid_data) -> int:
+    """Helper to safely extract amount whether it is an int, float, or structured dict."""
+    if isinstance(paid_data, dict):
+        return int(paid_data.get("amount", 0))
+    elif isinstance(paid_data, (int, float)):
+        return int(paid_data)
+    return 0
 
 # ================= 📋 ကျောင်းသားစာရင်းကြည့်ရန် (/list) =================
 async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_super_admin(update.effective_user.id): return
+    if not is_super_admin(update.effective_user.id): 
+        return
     
     db = get_db()
     students = await db.student_info.find({}).to_list(length=None)
-    if not students: return await update.message.reply_text("စာရင်းမရှိသေးပါ။")
+    if not students: 
+        return await update.message.reply_text("စာရင်းမရှိသေးပါ။")
 
     registered_nums = {int(re.search(r'(\d+)$', s.get("roll_no", "")).group(1)) for s in students if re.search(r'(\d+)$', s.get("roll_no", ""))}
     max_roll = max(registered_nums) if registered_nums else 59
-    if max_roll < 59: max_roll = 59 
+    if max_roll < 59: 
+        max_roll = 59 
 
     missing_rolls = [i for i in range(1, max_roll + 1) if i not in registered_nums]
     missing_str = ", ".join([f"{i:02d}" for i in missing_rolls])
@@ -50,68 +63,103 @@ async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= 🏠 အဆောင်နေ ကျောင်းသားများ (/hostel) =================
 async def hostel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_super_admin(update.effective_user.id): return
+    if not is_super_admin(update.effective_user.id): 
+        return
     
     db = get_db()
     students = await db.student_info.find({"hostel": {"$in": ["Yes", "yes", True]}}).sort("roll_no", 1).to_list(length=None)
-    if not students: return await update.message.reply_text("အဆောင်နေ ကျောင်းသား မရှိသေးပါ။")
+    if not students: 
+        return await update.message.reply_text("အဆောင်နေ ကျောင်းသား မရှိသေးပါ။")
     
     msg = "🏠 <b>အဆောင်နေ ကျောင်းသားများ</b>\n━━━━━━━━━━━━━━\n"
-    for s in students: msg += f"🔹 {s.get('roll_no')} - {s.get('name')}\n"
+    for s in students: 
+        msg += f"🔹 {s.get('roll_no')} - {s.get('name')}\n"
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 # ================= 🏦 ရန်ပုံငွေ အခြေအနေချုပ် (/vault) =================
 async def vault_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_super_admin(update.effective_user.id): return #[cite: 2]
+    if not is_super_admin(update.effective_user.id): 
+        return 
     
-    db = get_db() #[cite: 2]
-    funds = await db.funds.find({}).to_list(length=None) #[cite: 2]
-    if not funds: return await update.message.reply_text("ရန်ပုံငွေ ခေါင်းစဉ်များ မရှိသေးပါ။") #[cite: 2]
+    db = get_db() 
+    funds = await db.funds.find({}).to_list(length=None) 
+    if not funds: 
+        return await update.message.reply_text("ရန်ပုံငွေ ခေါင်းစဉ်များ မရှိသေးပါ။") 
     
-    students = await db.student_info.find({}).to_list(length=None) #[cite: 2]
+    students = await db.student_info.find({}).to_list(length=None) 
     
+    # 📌 Archive လုပ်ထားသော Fund များကို ရှာဖွေခြင်း
+    archived_fund_ids = set()
+    for f in funds:
+        if f.get("status") == "archived":
+            archived_fund_ids.add(f.get("fund_id", "").lower())
+            
+    sys_config = await db.sys_config.find_one({"type": "archived_funds"})
+    if sys_config:
+        for f_id in sys_config.get("funds", []):
+            archived_fund_ids.add(f_id.lower())
+
     active_msg = "🏦 <b>VAULT (လက်ရှိ ရန်ပုံငွေ အခြေအနေ)</b>\n━━━━━━━━━━━━━━\n"
     archive_msg = "\n📦 <b>ဆရာမထံ အပ်နှံပြီးသော ရန်ပုံငွေများ (Archived)</b>\n━━━━━━━━━━━━━━\n"
     
-    grand_total = 0 #[cite: 2]
+    grand_total = 0 
     archive_total = 0
     has_archive = False
     
-    for f in funds: #[cite: 2]
-        f_id = f.get("fund_id") #[cite: 2]
-        if not f_id: continue #[cite: 2]
+    for f in funds: 
+        f_id = f.get("fund_id") 
+        if not f_id: 
+            continue 
         
-        f_name = f.get("fund_name", f_id) #[cite: 2]
-        total = sum(s.get("paid_funds", {}).get(f_id, 0) for s in students) #[cite: 2]
+        clean_f_id = f_id.lower()
+        f_name = f.get("fund_name", f_id) 
         
-        # Archive ဖြစ်နေပါက အောက်ပိုင်းတွင် ပြမည်
-        if f.get("status") == "archived":
+        # 📌 amount တွက်ချက်ခြင်း
+        total = 0
+        for s in students:
+            f_data = s.get("paid_funds", {}).get(clean_f_id) or s.get("paid_funds", {}).get(f_id, 0)
+            total += extract_paid_amount(f_data)
+        
+        if clean_f_id in archived_fund_ids:
             has_archive = True
             archive_total += total
             archive_msg += f"📦 <b>{f_name}</b>: {total:,} MMK\n"
         else:
-            grand_total += total #[cite: 2]
-            active_msg += f"💰 <b>{f_name}</b>: {total:,} MMK\n" #[cite: 2]
+            grand_total += total 
+            active_msg += f"💰 <b>{f_name}</b>: {total:,} MMK\n" 
             
-    active_msg += f"\n📊 <b>လက်ရှိ Grand Total: {grand_total:,} MMK</b>" #[cite: 2]
+    ledgers = await db.ec_ledgers.find({}).to_list(length=None)
+    total_ec_spent = sum(ledger.get("total_spent", 0) for ledger in ledgers)
+    net_balance = grand_total - total_ec_spent
+
+    active_msg += f"\n📥 <b>စုစုပေါင်း ကောက်ခံရငွေ: {grand_total:,} MMK</b>\n" 
+    active_msg += f"📤 <b>EC များ သုံးစွဲပြီးငွေ: {total_ec_spent:,} MMK</b>\n"
+    active_msg += f"📊 <b>လက်ကျန်ငွေ (Net Balance): {net_balance:,} MMK</b>"
     
     final_msg = active_msg
     if has_archive:
         archive_msg += f"\n📊 <b>အပ်နှံပြီး စုစုပေါင်း: {archive_total:,} MMK</b>"
         final_msg += "\n" + archive_msg
         
-    await update.message.reply_text(final_msg, parse_mode=ParseMode.HTML) #[cite: 2]
+    await update.message.reply_text(final_msg, parse_mode=ParseMode.HTML)
 
 # ================= 📊 ရန်ပုံငွေ အခြေအနေခွဲကြည့်ရန် (/report) =================
 async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_super_admin(update.effective_user.id): return
-    if not context.args: return await update.message.reply_text("⚠️ အသုံးပြုနည်း: /report <FundID>")
+    if not is_super_admin(update.effective_user.id):
+        return
+        
+    if not context.args:
+        return await update.message.reply_text(
+            "⚠️ <b>အသုံးပြုနည်း:</b> <code>/report &lt;FundID&gt;</code>", 
+            parse_mode=ParseMode.HTML
+        )
     
     fund_id = context.args[0].lower()
     db = get_db()
     
-    fund = await db.funds.find_one({"fund_id": fund_id})
-    if not fund: return await update.message.reply_text("⚠️ ထိုအမည်ဖြင့် ရန်ပုံငွေ မရှိပါ။")
+    fund = await db.funds.find_one({"fund_id": re.compile(f"^{fund_id}$", re.IGNORECASE)})
+    if not fund:
+        return await update.message.reply_text("⚠️ ထိုအမည်ဖြင့် ရန်ပုံငွေ မရှိပါ။")
     
     target = fund.get("target_amount", 0)
     students = await db.student_info.find({}).to_list(length=None)
@@ -120,55 +168,69 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = 0
     
     for s in students:
-        paid = s.get("paid_funds", {}).get(fund_id, 0)
+        paid_data = s.get("paid_funds", {}).get(fund_id, 0)
+        paid_amount = extract_paid_amount(paid_data)
+            
         roll = s.get("roll_no", "Unknown")
-        total += paid
+        total += paid_amount
+        
         match = re.search(r'(\d+)$', roll)
         roll_num = int(match.group(1)) if match else 9999
-        data = {"roll": roll, "roll_num": roll_num, "paid": paid}
+        data = {"roll": roll, "roll_num": roll_num, "paid": paid_amount}
         
-        if paid >= target: paid_list.append(data)
-        elif paid > 0: partial_list.append(data)
-        else: unpaid_list.append(data)
+        if paid_amount >= target and target > 0:
+            paid_list.append(data)
+        elif paid_amount > 0:
+            partial_list.append(data)
+        else:
+            unpaid_list.append(data)
             
     paid_list.sort(key=lambda x: x["roll_num"])
     partial_list.sort(key=lambda x: x["roll_num"])
     unpaid_list.sort(key=lambda x: x["roll_num"])
     
     p_str = ', '.join([x["roll"] for x in paid_list])
-    pt_str = ', '.join([f"{x['roll']} ({x['paid']})" for x in partial_list])
+    pt_str = ', '.join([f"{x['roll']} ({x['paid']:,})" for x in partial_list])
     up_str = ', '.join([x["roll"] for x in unpaid_list])
 
-    msg = f"📊 <b>{fund.get('fund_name', fund_id)} Report</b>\n━━━━━━━━━━━━━━\n"
+    msg = f"📊 <b>{fund.get('fund_name', fund_id.capitalize())} Report</b>\n━━━━━━━━━━━━━━\n"
     msg += f"🟢 <b>Paid ({len(paid_list)}):</b> {p_str if p_str else '-'}\n\n"
     msg += f"🟡 <b>Partial ({len(partial_list)}):</b> {pt_str if pt_str else '-'}\n\n"
-    msg += f"🔴 <b>Unpaid ({len(unpaid_list)}):</b> {up_str if up_str else '-'}\n\n💰 <b>Total Collected:</b> {total:,} MMK"
+    msg += f"🔴 <b>Unpaid ({len(unpaid_list)}):</b> {up_str if up_str else '-'}\n\n"
+    msg += f"💰 <b>Total Collected:</b> {total:,} MMK"
+    
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 # ================= 🔔 ငွေမသွင်းရသေးသူများကို သတိပေးရန် (/remind) =================
 async def remind_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """အသုံးပြုနည်း: /remind <FundID>"""
-    if not is_super_admin(update.effective_user.id): return
+    if not is_super_admin(update.effective_user.id): 
+        return
     
     if not context.args:
-        return await update.message.reply_text("⚠️ <b>အသုံးပြုနည်း:</b> <code>/remind &lt;FundID&gt;</code>\n(ဥပမာ - <code>/remind sports</code>)", parse_mode=ParseMode.HTML)
+        return await update.message.reply_text(
+            "⚠️ <b>အသုံးပြုနည်း:</b> <code>/remind &lt;FundID&gt;</code>\n(ဥပမာ - <code>/remind sports</code>)", 
+            parse_mode=ParseMode.HTML
+        )
         
     fund_id = context.args[0].lower()
     db = get_db()
     
-    fund = await db.funds.find_one({"fund_id": fund_id})
+    fund = await db.funds.find_one({"fund_id": re.compile(f"^{fund_id}$", re.IGNORECASE)})
     if not fund:
-        return await update.message.reply_text(f"⚠️ <code>{fund_id}</code> အမည်ဖြင့် ရန်ပုံငွေ မရှိပါ။ အရင်ဆုံး /newfund ဖြင့် ဖန်တီးပါ။", parse_mode=ParseMode.HTML)
+        return await update.message.reply_text(
+            f"⚠️ <code>{fund_id}</code> အမည်ဖြင့် ရန်ပုံငွေ မရှိပါ။ အရင်ဆုံး /newfund ဖြင့် ဖန်တီးပါ။", 
+            parse_mode=ParseMode.HTML
+        )
         
     target_amount = fund.get("target_amount", 0)
     fund_name = fund.get("fund_name", fund_id)
     
-    # 📌 2. ကျောင်းသား အားလုံးကို ဆွဲထုတ်ခြင်း
     raw_students = await db.student_info.find({}).to_list(length=None)
     if not raw_students:
         return await update.message.reply_text("⚠️ Database တွင် ကျောင်းသားစာရင်း မရှိသေးပါ။", parse_mode=ParseMode.HTML)
         
-    # 💡 [ SMART FILTER ] Duplicate/Ghost စာရင်းများကို Code ထဲတွင် Auto ရှင်းလင်းခြင်း
+    # Duplicate ကျောင်းသားစာရင်းများ ရှင်းလင်းခြင်း
     unique_students = {}
     for st in raw_students:
         r_no = st.get("roll_no")
@@ -179,7 +241,6 @@ async def remind_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         has_id = bool(st.get("user_id") or st.get("tg_id"))
         existing_has_id = bool(existing.get("user_id") or existing.get("tg_id")) if existing else False
         
-        # မရှိသေးရင် (သို့) အရင်ကောင်က ID မပါဘဲ အခုကောင်က ID ပါနေရင် အစားထိုးမည် (အကောင်အစစ်ကို ယူမည်)
         if not existing or (not existing_has_id and has_id):
             unique_students[r_no] = st
             
@@ -190,12 +251,11 @@ async def remind_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     success_count = 0
     failed_students = []
     
-    # 📌 3. တစ်ယောက်ချင်းစီကို စစ်ဆေး၍ DM ပို့ခြင်း (ယခုအခါ အတိအကျ ဖြစ်သွားပါပြီ)
     for student in students:
-        paid = student.get("paid_funds", {}).get(fund_id, 0)
+        paid_data = student.get("paid_funds", {}).get(fund_id, 0)
+        paid = extract_paid_amount(paid_data)
         remaining = target_amount - paid
         
-        # သွင်းရန်ကျန်နေသေးလျှင်
         if remaining > 0:
             user_id = student.get("user_id") or student.get("tg_id") 
             roll_no = student.get("roll_no", "Unknown")
@@ -214,9 +274,9 @@ async def remind_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🔔 <b>FUND REMINDER (သတိပေးချက်)</b>\n━━━━━━━━━━━━━━━━━━\n"
                 f"👤 အမည်: <b>{student.get('name')}</b>\n"
                 f"🏷️ ရန်ပုံငွေ: <b>{fund_name}</b>\n\n"
-                f"🎯 သတ်မှတ်ထားသော ပမာဏ: {target_amount} MMK\n"
-                f"📥 သွင်းပြီးထားသော ပမာဏ: {paid} MMK\n"
-                f"⚠️ <b>ထပ်မံသွင်းရန် လိုအပ်ငွေ: {remaining} MMK</b>\n━━━━━━━━━━━━━━━━━━\n"
+                f"🎯 သတ်မှတ်ထားသော ပမာဏ: {target_amount:,} MMK\n"
+                f"📥 သွင်းပြီးထားသော ပမာဏ: {paid:,} MMK\n"
+                f"⚠️ <b>ထပ်မံသွင်းရန် လိုအပ်ငွေ: {remaining:,} MMK</b>\n━━━━━━━━━━━━━━━━━━\n"
                 f"<i>ကျေးဇူးပြု၍ သတ်မှတ်ရက်အတွင်း EC များထံအမြန်ဆုံး ပေးသွင်းပေးပါရန် မေတ္တာရပ်ခံအပ်ပါသည်။</i>"
             )
             
@@ -226,12 +286,9 @@ async def remind_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await asyncio.sleep(0.5) 
             except Exception as e:
                 logger.error(f"Failed to remind user {user_id}: {e}")
-                # ID ရှိလျက်နဲ့ ပို့မရသူ (Block ထားသူ) များကို မှတ်မည်
                 failed_students.append(display_fail) 
                 
-    # 📌 4. Report အပြီးသတ် ထုတ်ပြန်ခြင်း
     failed_count = len(failed_students)
-    
     summary_msg = (
         f"✅ <b>သတိပေးခြင်း ပြီးဆုံးပါပြီ။</b>\n\n"
         f"📩 အောင်မြင်စွာ ပို့ပြီးသူ: <b>{success_count}</b> ဦး\n"
@@ -246,32 +303,31 @@ async def remind_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= 📂 စာရင်းအပြည့်အစုံ CSV ထုတ်ရန် (/export) =================
 async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_super_admin(update.effective_user.id): return
+    if not is_super_admin(update.effective_user.id): 
+        return
     
     db = get_db()
     students = await db.student_info.find({}).to_list(length=None)
-    if not students: return await update.message.reply_text("စာရင်းမရှိပါ။")
+    if not students: 
+        return await update.message.reply_text("စာရင်းမရှိပါ။")
     
-    # ရန်ပုံငွေ ခေါင်းစဉ်များကို ရယူခြင်း
     funds = await db.funds.find({}).to_list(length=None)
     fund_ids = [f.get("fund_id") for f in funds if f.get("fund_id")]
     fund_names = [f.get("fund_name", f_id) for f, f_id in zip(funds, fund_ids)]
     
-    # ခုံနံပါတ်စဉ်အလိုက် စီခြင်း
     students.sort(key=lambda x: int(re.search(r'(\d+)$', x.get("roll_no", "0")).group(1)) if re.search(r'(\d+)$', x.get("roll_no", "0")) else 9999)
     
     output = io.StringIO()
     writer = csv.writer(output)
     
-    # 📌 Admin လိုချင်သည့်အတိုင်း Name, Roll No သာထားပြီး Fund Columns များကိုပါ ပေါင်းထည့်ပေးခြင်း
     headers = ["Roll No", "Name"] + fund_names
     writer.writerow(headers)
     
     for s in students:
         row = [s.get("roll_no", ""), s.get("name", "")]
         for f_id in fund_ids:
-            paid = s.get("paid_funds", {}).get(f_id, 0)
-            row.append(paid)
+            paid_data = s.get("paid_funds", {}).get(f_id, 0)
+            row.append(extract_paid_amount(paid_data))
         writer.writerow(row)
         
     output.seek(0)
@@ -284,26 +340,38 @@ async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= 📂 သတ်မှတ် Fund ID အလိုက် Excel (.xlsx) ထုတ်ယူခြင်း (/exportfund) =================
 async def export_fund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_super_admin(update.effective_user.id): return
-    if len(context.args) < 1: return await update.message.reply_text("⚠️ <b>အသုံးပြုနည်း:</b> <code>/exportfund &lt;FundID&gt;</code>", parse_mode=ParseMode.HTML)
+    if not is_super_admin(update.effective_user.id): 
+        return
+    if len(context.args) < 1: 
+        return await update.message.reply_text("⚠️ <b>အသုံးပြုနည်း:</b> <code>/exportfund &lt;FundID&gt;</code>", parse_mode=ParseMode.HTML)
         
     fund_id = context.args[0].lower()
     db = get_db()
     
-    fund = await db.funds.find_one({"fund_id": fund_id})
-    if not fund: return await update.message.reply_text(f"⚠️ <code>{fund_id}</code> အမည်ဖြင့် ရန်ပုံငွေ မရှိပါ။", parse_mode=ParseMode.HTML)
+    fund = await db.funds.find_one({"fund_id": re.compile(f"^{fund_id}$", re.IGNORECASE)})
+    if not fund: 
+        return await update.message.reply_text(f"⚠️ <code>{fund_id}</code> အမည်ဖြင့် ရန်ပုံငွေ မရှိပါ။", parse_mode=ParseMode.HTML)
         
     fund_name = fund.get("fund_name", fund_id)
     students = await db.student_info.find({}).to_list(length=None)
-    if not students: return await update.message.reply_text("⚠️ Database ထဲတွင် ကျောင်းသား အချက်အလက် မရှိသေးပါ။")
+    if not students: 
+        return await update.message.reply_text("⚠️ Database ထဲတွင် ကျောင်းသား အချက်အလက် မရှိသေးပါ။")
 
     export_data, total_collected = [], 0
     for s in students:
         roll = s.get("roll_no", "➖")
         match = re.search(r'(\d+)$', roll)
-        paid = s.get("paid_funds", {}).get(fund_id, 0)
-        export_data.append({"roll": roll, "roll_num": int(match.group(1)) if match else 9999, "name": s.get("name", "➖"), "status": "Paid" if paid > 0 else "Unpaid", "paid": paid})
-        total_collected += paid
+        paid_data = s.get("paid_funds", {}).get(fund_id, 0)
+        paid_amount = extract_paid_amount(paid_data)
+        
+        export_data.append({
+            "roll": roll, 
+            "roll_num": int(match.group(1)) if match else 9999, 
+            "name": s.get("name", "➖"), 
+            "status": "Paid" if paid_amount > 0 else "Unpaid", 
+            "paid": paid_amount
+        })
+        total_collected += paid_amount
         
     export_data.sort(key=lambda x: (-x["paid"], x["roll_num"]))
     
@@ -312,7 +380,8 @@ async def export_fund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ws.title = fund_name[:31]
     
     ws.append(["Roll No", "Name", "Status", "Amount"])
-    for col in range(1, 5): ws.cell(row=1, column=col).font = Font(bold=True)
+    for col in range(1, 5): 
+        ws.cell(row=1, column=col).font = Font(bold=True)
         
     green_fill, green_font = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid"), Font(color="006100")
     red_fill, red_font = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid"), Font(color="9C0006")

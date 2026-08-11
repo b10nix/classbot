@@ -1,3 +1,4 @@
+import uuid
 import html
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -5,8 +6,9 @@ from telegram.ext import ContextTypes, ConversationHandler
 from telegram.constants import ParseMode
 
 from database.db import get_db
-from utils.constants import FOOTER
-from utils.helpers import get_user_identity, get_allowed_groups
+# 📌 လိုအပ်မည့် Helper များနှင့် Constants များကို ထည့်သွင်းထားသည်
+from utils.constants import FOOTER, LOG_GROUP_ID
+from utils.helpers import get_user_identity, get_allowed_groups, get_safe_user_link, get_mm_time
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,7 @@ async def reply_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reply_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message.text
     user_id = update.effective_user.id
+    first_name = html.escape(update.effective_user.first_name)
     
     post_id = context.user_data.get('reply_target_id')
     group_id = context.user_data.get('reply_group_id')
@@ -89,6 +92,38 @@ async def reply_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_to_message_id=msg_to_reply,
             parse_mode=ParseMode.HTML
         )
+        
+        # 📌 ဤနေရာမှစ၍ Log System အသစ်ကို ထည့်သွင်းထားသည်
+        if LOG_GROUP_ID != 0:
+            log_id = f"{str(uuid.uuid4())[:5].upper()}"
+            display_user = f"<a href='tg://user?id={user_id}'>{first_name}</a>"
+            
+            # မူလ Post ၏ စာသားကို အစမ်းပြသရန် ရှာဖွေခြင်း
+            orig_post = await db.pending_posts.find_one({"post_id": post_id})
+            orig_msg_text = orig_post.get("msg", "Unknown Post") if orig_post else "Unknown Post"
+            
+            # စာကြောင်းရှည်နေပါက ပထမစာကြောင်းကိုသာ ဖြတ်ယူပြသမည့်စနစ်
+            short_orig_msg = orig_msg_text.split('\n')[0]
+            if len(short_orig_msg) > 35: 
+                short_orig_msg = short_orig_msg[:35] + "..."
+
+            log_txt = (
+                f"💬 <b>LOG #{log_id} • REPLY</b>\n\n"
+                f"👤 {display_user}\n"
+                f"🆔 <code>{user_id}</code>\n\n"
+                f"↪ <b>Reply To</b>\n"
+                f"🏷️ {signature}\n"
+                f"📌 <i>{html.escape(short_orig_msg)}</i>\n\n"
+                f"━━━━━━━━━━━━━━━━━━\n\n"
+                f"{html.escape(msg)}\n\n"
+                f"━━━━━━━━━━━━━━━━━━\n\n"
+                f"🕒 {get_mm_time()}"
+            )
+            try:
+                await context.bot.send_message(LOG_GROUP_ID, text=log_txt, parse_mode=ParseMode.HTML)
+            except Exception as e:
+                logger.error(f"Failed to send reply log to LOG_GROUP_ID: {e}")
+
         await update.message.reply_text("<pre>✅ REPLY DELIVERED SUCCESSFULLY.</pre>", parse_mode=ParseMode.HTML)
     except Exception as e:
         logger.error(f"Reply send failed for {group_id}: {e}")

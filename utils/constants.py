@@ -21,6 +21,13 @@ RANDOM_EMOJIS = [
     "🐞", "🦗", "🕷️", "🦂", "🦟", "🦠", "🏔️", "🌋", "🏕️", "🏖️", "🏜️", "🏝️", "🏞️", "🪐", "🌟", "🔥", "💧", "🌊", "🌈", "⛄"
 ]
 
+#EC IDs for assigning EC to users
+EC_MAP = {
+    "ben": 6598291638, 
+    "chan": 1898170145, 
+    "jojo": 6948534484
+}
+
 def _get_class_groups():
     group_id_str = os.getenv("CLASS_GROUP_ID", "0")
     try:

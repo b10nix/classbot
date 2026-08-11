@@ -12,7 +12,7 @@ from database.db import get_db
 logger = logging.getLogger(__name__)
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 DAYS_OF_WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
-MAJORS = ["it", "mc", "archi", "ep", "ec", "me", "civil"] # Routing အတွက် Default List
+MAJORS = ["it", "mc", "archi", "ep", "ec", "mech", "civil"] # Routing အတွက် Default List
 T_SUBJECT, T_DATE, T_CONTENT = range(70, 73)
 SUBJECTS_LIST = ["Myanmar", "English", "Maths", "Physics", "CEIT", "Workshop"]
 

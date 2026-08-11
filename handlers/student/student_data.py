@@ -22,15 +22,18 @@ def build_fund_text(student_paid: dict, funds: list) -> str:
         if not f_id: continue
         f_name = f.get("fund_name", f_id)
         target = f.get("target_amount", 0)
-        paid = student_paid.get(f_id, 0)
+        
+        # 📌 dictionary နှင့် int နှစ်မျိုးလုံးအတွက် အလုပ်လုပ်အောင် ပြင်ဆင်ထားသည်
+        f_data = student_paid.get(f_id, 0)
+        paid = f_data.get("amount", 0) if isinstance(f_data, dict) else f_data
         
         if paid >= target:
-            text += f"✅ <b>{f_name}:</b> {paid} / {target}\n"
+            text += f"✅ <b>{f_name}:</b> {paid:,} / {target:,}\n"
         elif paid > 0:
             remain = target - paid
-            text += f"🟡 <b>{f_name}:</b> {paid} / {target} (⚠️ {remain} လိုသေး)\n"
+            text += f"🟡 <b>{f_name}:</b> {paid:,} / {target:,} (⚠️ {remain:,} လိုသေး)\n"
         else:
-            text += f"🔴 <b>{f_name}:</b> 0 / {target} (⚠️ {target} လိုသေး)\n"
+            text += f"🔴 <b>{f_name}:</b> 0 / {target:,} (⚠️ {target:,} လိုသေး)\n"
     return text
 
 def build_student_message(student: dict, funds: list) -> str:
@@ -41,13 +44,14 @@ def build_student_message(student: dict, funds: list) -> str:
     hostel = "Yes" if str(student.get("hostel", "")).lower() in ["yes", "true", "1"] else "No"
     
     tg_username = student.get("tg_username")
-    tg_id = student.get("user_id")
+    # 📌 tg_id (သို့) user_id နှစ်မျိုးလုံးကို စစ်ဆေးယူမည်
+    tg_id = student.get("user_id") or student.get("tg_id") 
     
-    # Telegram Link ချိတ်ဆက်ခြင်း
-    if tg_username:
-        tg_link = f"@{tg_username}"
-    elif tg_id:
-        tg_link = f"<a href='tg://user?id={tg_id}'>Profile Link</a>"
+    # 📌 [THE UPGRADE] Telegram ID ကို အဓိကထား၍ အသေချိတ်ဆက်မည်
+    if tg_id:
+        tg_link = f"<a href='tg://user?id={tg_id}'>👤 View Profile</a>"
+    elif tg_username:
+        tg_link = f"@{tg_username.replace('@', '')}"
     else:
         tg_link = "Not Linked"
 
@@ -89,9 +93,29 @@ async def inline_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = get_db()
     
-    # 📌 DB ကို အကြိမ်ကြိမ်မခေါ်ဘဲ Fund Data ကို တစ်ခါတည်း Cache လုပ်ယူထားမည်
-    funds = await db.funds.find({}).to_list(length=None)
+    # 📌 1. Database မှ Fund အားလုံးကို ဆွဲထုတ်မည်
+    all_funds = await db.funds.find({}).to_list(length=None)
     
+    # 📌 2. Archived ဖြစ်နေသော Fund များကို ရှာဖွေမည်
+    sys_config = await db.sys_config.find_one({"type": "archived_funds"})
+    archived_fund_ids = set()
+    if sys_config:
+        for f_id in sys_config.get("funds", []):
+            archived_fund_ids.add(f_id.lower())
+
+    # 📌 3. Active ဖြစ်သော Fund များကိုသာ စစ်ထုတ်ယူမည် (Archived ကို လုံးဝ ဖြတ်ထုတ်မည်)
+    active_funds = []
+    for f in all_funds:
+        f_id = f.get("fund_id", "")
+        if not f_id: continue
+        
+        clean_f_id = f_id.lower()
+        if f.get("status") == "archived" or clean_f_id in archived_fund_ids:
+            continue  # Archive ထဲပါနေလျှင် ကျော်သွားမည်
+            
+        active_funds.append(f)
+    
+    # 📌 4. ကျောင်းသားများကို ရှာဖွေမည်
     regex = re.compile(re.escape(query), re.IGNORECASE)
     students = await db.student_info.find({"$or": [{"roll_no": regex}, {"name": regex}]}).to_list(length=15)
 
@@ -100,7 +124,8 @@ async def inline_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         roll = s.get("roll_no", "Unknown")
         name = s.get("name", "Unknown")
         
-        msg_text = build_student_message(s, funds)
+        # 📌 Active Funds များကိုသာ Helper သို့ ပို့ပေးမည်ဖြစ်၍ Archive များ လုံးဝ ပေါ်လာမည်မဟုတ်ပါ
+        msg_text = build_student_message(s, active_funds)
         
         results.append(
             InlineQueryResultArticle(
@@ -122,7 +147,7 @@ async def add_dummy_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Dummy Fund ထည့်သွင်းခြင်း
     await db.funds.update_one(
         {"fund_id": "sports"}, 
-        {"$set": {"target_amount": 5000, "fund_name": "Sports Fund"}}, 
+        {"$set": {"target_amount": 5000, "fund_name": "Sports Fund", "status": "active"}}, 
         upsert=True
     )
     
@@ -134,7 +159,7 @@ async def add_dummy_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "phone": f"0912345678{i}",
             "hostel": "Yes" if i % 2 == 0 else "No",
             "tg_username": f"dummy_{i}",
-            "paid_funds": {"sports": 2000 * i}  # ပေးသွင်းငွေ အတိုးအလျှော့လေးတွေ ပါဝင်မည်
+            "paid_funds": {"sports": 2000 * i}
         })
         
     await update.message.reply_text("✅ Realistic Dummy Data များ (Funds, Students, Payments) ထည့်သွင်းပြီးပါပြီ။")

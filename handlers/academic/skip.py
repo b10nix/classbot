@@ -51,7 +51,7 @@ async def skip_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("💻 IT", callback_data="skipmaj_it"), InlineKeyboardButton("📡 EC", callback_data="skipmaj_ec")],
         [InlineKeyboardButton("🏗️ Civil", callback_data="skipmaj_civil"), InlineKeyboardButton("⚡ EP", callback_data="skipmaj_ep")],
-        [InlineKeyboardButton("⚙️ ME", callback_data="skipmaj_me"), InlineKeyboardButton("🤖 MC", callback_data="skipmaj_mc")],
+        [InlineKeyboardButton("⚙️ ME", callback_data="skipmaj_mech"), InlineKeyboardButton("🤖 MC", callback_data="skipmaj_mc")],
         [InlineKeyboardButton("🏛️ Archi", callback_data="skipmaj_archi")],
         [InlineKeyboardButton("❌ Cancel", callback_data="skip_cancel")]
     ]

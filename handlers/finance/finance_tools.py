@@ -1,5 +1,6 @@
 import csv
 import io
+import re
 from datetime import datetime, timezone, timedelta
 from telegram import Update, InputFile
 from telegram.ext import ContextTypes
@@ -8,40 +9,120 @@ from telegram.constants import ParseMode
 # ⚠️ မိမိတို့ Project ၏ Database နှင့် Auth စနစ်ကို ဤနေရာတွင် မှန်ကန်စွာ Import လုပ်ရန် လိုအပ်ပါသည်
 from database.db import get_db 
 from utils.auth import is_super_admin, is_owner
-
-# ================= 📌 EC Mapping (Constants) =================
-# EC များ၏ Telegram User ID များကို ဤနေရာတွင် ကြိုတင်သတ်မှတ်ထားပါ
-EC_MAP = {
-    "ben": 6598291638,  # User ID အမှန်များကို ပြင်ထည့်ပါ
-    "chan": 1898170145, 
-    "jojo": 6948534484    
-}
+from utils.constants import EC_MAP
 
 # ================= 💰 1. EC ထံ ငွေလွှဲပေးခြင်း (/allocate) =================
 async def allocate_fund(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_super_admin(update.effective_user.id): return
+    from utils.auth import is_super_admin
+    from utils.helpers import get_mm_time
     
-    if len(context.args) < 2:
-        return await update.message.reply_text("⚠️ <b>အသုံးပြုနည်း:</b> <code>/allocate @username ပမာဏ</code>", parse_mode=ParseMode.HTML)
-        
-    ec_username = context.args[0].replace("@", "")
+    user_id = update.effective_user.id
+    sender_username = update.effective_user.username.lower() if update.effective_user.username else ""
+    
+    if not is_super_admin(user_id):
+        return await update.message.reply_text("⛔ ဤ Command ကို Super Admin များသာ သုံးခွင့်ရှိသည်။")
+
+    args = context.args
+    if len(args) < 2:
+        return await update.message.reply_text("⚠️ အသုံးပြုနည်း: /allocate [username_or_id] [amount]")
+
+    target_name = args[0].replace("@", "").lower()
     try:
-        amount = int(context.args[1])
+        amount = int(args[1])
     except ValueError:
-        return await update.message.reply_text("⚠️ ပမာဏကို ဂဏန်းဖြင့်သာ ထည့်ပါ။")
+        return await update.message.reply_text("⚠️ ငွေပမာဏသည် ဂဏန်းဖြစ်ရပါမည်။")
 
     db = get_db()
+    receiver_id = None
     
+    # 🕵️‍♂️ ၁။ EC_MAP ထဲတွင် Nickname ဖြင့် အရင်ရှာဖွေမည်
+    try:
+        for nick, tg_id in EC_MAP.items():
+            if nick.lower() == target_name:
+                receiver_id = tg_id
+                break
+    except Exception:
+        pass
+
+    # 🕵️‍♂️ ၂။ ဂဏန်း ID ကို တိုက်ရိုက်ရိုက်ထည့်ခဲ့လျှင်
+    if not receiver_id and target_name.isdigit():
+        receiver_id = int(target_name)
+
+    # 🕵️‍♂️ ၃။ Database တွင် ရှာဖွေမည်
+    if not receiver_id:
+        target_ec = await db.approvers.find_one({"username": {"$regex": f"^{target_name}$", "$options": "i"}})
+        if target_ec:
+            receiver_id = target_ec.get("user_id")
+
+    if not receiver_id:
+        ledger_ec = await db.ec_ledgers.find_one({"username": {"$regex": f"^{target_name}$", "$options": "i"}})
+        if ledger_ec:
+            receiver_id = ledger_ec.get("user_id", ledger_ec.get("ec_id"))
+
+    if not receiver_id:
+        return await update.message.reply_text("⚠️ ထို EC ကို ရှာမတွေ့ပါ။ Database တွင် စာရင်းသွင်းထားခြင်း ရှိမရှိ စစ်ဆေးပါ။")
+
+    # 🔥 [THE FIX] Document အဟောင်းကို အတိအကျ အရင်ရှာပြီးမှ Update လုပ်မည်
+    # Sender Ledger ရှာမည်
+    sender_ledger = await db.ec_ledgers.find_one({
+        "$or": [{"user_id": user_id}, {"ec_id": user_id}, {"username": sender_username}]
+    })
+    
+    if sender_ledger:
+        await db.ec_ledgers.update_one({"_id": sender_ledger["_id"]}, {"$inc": {"transferred_out": amount}})
+    else:
+        # လုံးဝမရှိသေးမှသာ အသစ်ဖန်တီးမည်
+        await db.ec_ledgers.insert_one({
+            "user_id": user_id, "username": sender_username, "total_spent": 0, "transferred_out": amount, "transferred_in": 0
+        })
+
+    # Receiver Ledger ရှာမည်
+    receiver_ledger = await db.ec_ledgers.find_one({
+        "$or": [{"user_id": receiver_id}, {"ec_id": receiver_id}, {"username": target_name}]
+    })
+    
+    if receiver_ledger:
+        await db.ec_ledgers.update_one({"_id": receiver_ledger["_id"]}, {"$inc": {"transferred_in": amount}})
+    else:
+        # လုံးဝမရှိသေးမှသာ အသစ်ဖန်တီးမည်
+        await db.ec_ledgers.insert_one({
+            "user_id": receiver_id, "username": target_name, "total_spent": 0, "transferred_out": 0, "transferred_in": amount
+        })
+
+    # 📌 မှတ်တမ်းတင်ခြင်း
+    await db.transfers.insert_one({
+        "from_id": user_id,
+        "to_id": receiver_id,
+        "amount": amount,
+        "date": get_mm_time()
+    })
+
+    await update.message.reply_text(f"✅ EC <b>{args[0]}</b> ထံသို့ {amount:,} MMK လွှဲပြောင်းပေးပြီးပါပြီ။", parse_mode="HTML")
+
+    # 📌 Sender ၏ Transferred Out ထဲသို့ ပေါင်းထည့်ခြင်း
     await db.ec_ledgers.update_one(
-        {"username": ec_username},
-        {
-            "$inc": {"total_received": amount, "current_balance": amount},
-            "$setOnInsert": {"total_spent": 0, "expense_history": []}
-        },
+        {"user_id": user_id},
+        {"$inc": {"transferred_out": amount}},
         upsert=True
     )
-    
-    await update.message.reply_text(f"✅ <b>EC @{ec_username} ထံသို့ {amount} MMK လွှဲပြောင်းပေးပြီးပါပြီ။</b>", parse_mode=ParseMode.HTML)
+
+    # 📌 Receiver ၏ Transferred In ထဲသို့ ပေါင်းထည့်ခြင်း
+    await db.ec_ledgers.update_one(
+        {"user_id": receiver_id},
+        {"$inc": {"transferred_in": amount}},
+        upsert=True
+    )
+
+    # 📌 မှတ်တမ်းတင်ခြင်း (History) - get_mm_time() ကို import လုပ်ထားရန် လိုအပ်ပါသည်
+    from utils.helpers import get_mm_time
+    await db.transfers.insert_one({
+        "from_id": user_id,
+        "to_id": receiver_id,
+        "amount": amount,
+        "date": get_mm_time()
+    })
+
+    await update.message.reply_text(f"✅ EC <b>{args[0]}</b> ထံသို့ {amount:,} MMK လွှဲပြောင်းပေးပြီးပါပြီ။", parse_mode="HTML")
 
 # ================= 💸 EC ငွေသုံးစွဲမှု ရေးသွင်းခြင်း (/spend) =================
 async def spend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -242,12 +323,31 @@ async def ecstat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         active_fund_totals[clean_f_id] = active_fund_totals.get(clean_f_id, 0) + amount
                         grand_total_collected += amount
             
-    # 💸 ၅။ သုံးစွဲမှု (Ledger) တွက်ချက်ခြင်း (ယခုအခါ bella_ellen အမည်ဖြင့် ပါရှာသွားပါမည်)
-    ec_ledger = await db.ec_ledgers.find_one({"username": {"$in": target_identifiers}}) or {}
+    # 💸 ၅။ သုံးစွဲမှု (Ledger) နှင့် လွှဲပြောင်းငွေ တွက်ချက်ခြင်း
+    # ec_id သို့မဟုတ် username ဖြင့် ec_ledgers ထဲတွင် တိကျစွာ ရှာမည်
+    ec_ledger = await db.ec_ledgers.find_one({
+        "$or": [
+            {"ec_id": target_user_id},
+            {"ec_id": str(target_user_id)},
+            {"user_id": target_user_id},
+            {"username": {"$in": target_identifiers}}
+        ]
+    }) or {}
+
     total_spent = ec_ledger.get("total_spent", 0)
-    net_in_hand = grand_total_collected - total_spent
+    transferred_in = ec_ledger.get("transferred_in", 0)
+    transferred_out = ec_ledger.get("transferred_out", 0)
     
-    if assigned_students_count == 0 and grand_total_collected == 0 and total_spent == 0 and not archived_fund_totals:
+    # None/No field ဖြစ်နေခဲ့လျှင် 0 အဖြစ် ပြောင်းမည်
+    if not isinstance(transferred_in, (int, float)): transferred_in = 0
+    if not isinstance(transferred_out, (int, float)): transferred_out = 0
+
+    # 📌 တွက်ချက်မှု အသစ်စတင်ခြင်း
+    total_income = grand_total_collected + transferred_in
+    total_outflow = total_spent + transferred_out
+    net_in_hand = total_income - total_outflow
+    
+    if assigned_students_count == 0 and total_income == 0 and total_outflow == 0 and not archived_fund_totals:
         return await update.message.reply_text(f"⚠️ <b>{target_name}</b> ၏ စာရင်း မတွေ့ပါ (သို့) ရငွေ/သုံးငွေ မှတ်တမ်း မရှိသေးပါ။", parse_mode=ParseMode.HTML)
 
     # 💬 ၆။ Message တည်ဆောက်ခြင်း
@@ -255,7 +355,7 @@ async def ecstat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg += f"━━━━━━━━━━━━━━━━━━\n"
     msg += f"👥 တာဝန်ယူထားသော ကျောင်းသား: <b>{assigned_students_count}</b> ဦး\n\n"
     
-    msg += f"<b>[ 🎯 လက်ရှိ ကောက်ခံရရှိမှု (Active) ]</b>\n"
+    msg += f"<b>[ 🎯 ရငွေစာရင်း (Income) ]</b>\n"
     if active_fund_totals:
         for f_id, f_amt in active_fund_totals.items():
             display_name = fund_name_map.get(f_id, f_id)
@@ -263,11 +363,21 @@ async def ecstat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         msg += "<i>လက်ရှိ ကောက်ခံထားသော ငွေမရှိသေးပါ</i>\n"
         
-    msg += f"📥 <b>စုစုပေါင်း ရငွေ: {grand_total_collected:,} MMK</b>\n\n"
+    # transferred_in က 0 ထက်ကြီးမှသာ ပြမည်
+    if transferred_in > 0:
+        msg += f"• အခြား EC များထံမှ လက်ခံရရှိငွေ: <b>{transferred_in:,} MMK</b>\n"
+            
+    msg += f"📥 <b>စုစုပေါင်း ရငွေ: {total_income:,} MMK</b>\n\n"
     
-    msg += f"<b>[ 💸 သုံးစွဲမှုနှင့် လက်ကျန် ]</b>\n"
-    msg += f"📤 သုံးစွဲပြီးငွေ: <b>{total_spent:,} MMK</b>\n"
-    msg += f"💰 <b>လက်ထဲတွင် ကျန်ငွေ: {net_in_hand:,} MMK</b>\n"
+    msg += f"<b>[ 💸 သုံးစွဲမှုနှင့် ထွက်ငွေ (Outflow) ]</b>\n"
+    msg += f"• သုံးစွဲပြီးငွေ (Spent): <b>{total_spent:,} MMK</b>\n"
+    
+    if transferred_out > 0:
+        msg += f"• အခြား EC များသို့ လွှဲပြောင်းပေးငွေ: <b>{transferred_out:,} MMK</b>\n"
+        
+    msg += f"📤 <b>စုစုပေါင်း ထွက်ငွေ: {total_outflow:,} MMK</b>\n\n"
+    
+    msg += f"💰 <b>လက်ထဲတွင် ကျန်ငွေ (Net Balance): {net_in_hand:,} MMK</b>\n"
     
     if archived_fund_totals:
         msg += f"\n📦 <b>[ ဆရာမထံ အပ်နှံပြီးသော ရန်ပုံငွေများ ]</b>\n"
@@ -325,15 +435,13 @@ async def assign_ec_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ec_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     username = update.effective_user.username
-    
-    # ၁။ လက်ရှိ User ရဲ့ နာမည်/Nickname များကို စုဆောင်းမည် (Routing လုပ်ရန်)
+
+    # ၁။ လက်ရှိ User ရဲ့ နာမည်/Nickname များကို စုဆောင်းမည်
     my_identifiers = [str(user_id)]
     if username:
         my_identifiers.append(username.lower())
         
-    # EC_MAP ရှိခဲ့လျှင် လက်ရှိ User ရဲ့ Nickname (ဥပမာ - jojo, ben) ကို ရှာမည်
     try:
-        # သင့် Bot တွင် EC_MAP သတ်မှတ်ထားသော ဖိုင်မှ import လုပ်ပါ (ဥပမာ finance_tools.py ထဲမှာရှိရင် တိုက်ရိုက်သုံးပါ)
         for nick, tg_id in EC_MAP.items():
             if user_id == tg_id:
                 my_identifiers.append(nick.lower())
@@ -342,9 +450,8 @@ async def ec_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = get_db()
     
-    # 🕵️‍♂️ ၂။ Fund အချက်အလက်များ ယူမည် (Key ပြင်ဆင်ပြီး)
+    # 🕵️‍♂️ ၂။ Fund အချက်အလက်များ ယူမည်
     all_funds = await db.funds.find({}).to_list(length=None)
-    
     archived_fund_ids = set()
     fund_owners = {}
     fund_name_map = {}
@@ -356,12 +463,10 @@ async def ec_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if f.get("status") == "archived":
             archived_fund_ids.add(f_id)
             
-        # ⚠️ ပြင်ဆင်ချက်: Database တွင် အမှန်တကယ်သိမ်းထားသော 'managed_by' Key ကို ယူမည်
         manager = f.get("managed_by")
         if manager:
             fund_owners[f_id] = manager.lower()
             
-    # (sys_config ထဲက Archive အဟောင်းတွေ ပါရင် ထည့်ပေါင်းမယ်)
     sys_config = await db.sys_config.find_one({"type": "archived_funds"})
     if sys_config:
         for f in sys_config.get("funds", []):
@@ -375,7 +480,7 @@ async def ec_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
     archived_fund_totals = {}
     grand_total_collected = 0
     
-    # ⚙️ ၄။ ငွေများကို ပိုင်ရှင်အစစ်ထံ လမ်းကြောင်းခွဲခြင်း (The Core Logic)
+    # ⚙️ ၄။ ငွေများကို ပိုင်ရှင်အစစ်ထံ လမ်းကြောင်းခွဲခြင်း
     for st in all_students:
         is_my_student = (st.get("assigned_ec_id") == user_id or st.get("tg_id") == user_id)
         
@@ -392,12 +497,9 @@ async def ec_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 is_my_money = False
                 
-                # Routing Condition အသစ်
                 if fund_manager == "ec" and is_my_student:
-                    # အများကောက်သော Fund (ec) ဖြစ်ပြီး မိမိကျောင်းသား ဖြစ်နေလျှင်
                     is_my_money = True
                 elif fund_manager in my_identifiers:
-                    # သီးသန့်ကောက်သော Fund ဖြစ်ပြီး၊ Manager နာမည် (ဥပမာ - jojo) နှင့် မိမိ၏ Nickname/Username ကိုက်ညီလျှင်
                     is_my_money = True
                     
                 if is_my_money:
@@ -407,21 +509,41 @@ async def ec_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         active_fund_totals[clean_f_id] = active_fund_totals.get(clean_f_id, 0) + amount
                         grand_total_collected += amount
             
-    # 💸 ၅။ သုံးစွဲမှု (Ledger) တွက်ချက်ခြင်း
+    # 💸 ၅။ သုံးစွဲမှု (Ledger) နှင့် လွှဲပြောင်းငွေ တွက်ချက်ခြင်း (Clean Logic)
     query_name = my_identifiers[-1] if my_identifiers else "unknown"
-    ec_ledger = await db.ec_ledgers.find_one({"username": {"$in": my_identifiers}}) or {}
+    
+    # ec_id သို့မဟုတ် user_id ဖြင့် ec_ledgers ထဲတွင် တိကျစွာ ရှာမည်
+    ec_ledger = await db.ec_ledgers.find_one({
+        "$or": [
+            {"ec_id": user_id},
+            {"ec_id": str(user_id)},
+            {"user_id": user_id},
+            {"username": {"$in": my_identifiers}}
+        ]
+    }) or {}
+    
     total_spent = ec_ledger.get("total_spent", 0)
-    net_in_hand = grand_total_collected - total_spent
+    transferred_in = ec_ledger.get("transferred_in", 0)
+    transferred_out = ec_ledger.get("transferred_out", 0)
+    
+    # Data Type မှားယွင်းမှု မရှိစေရန် စစ်ဆေးခြင်း
+    if not isinstance(transferred_in, (int, float)): transferred_in = 0
+    if not isinstance(transferred_out, (int, float)): transferred_out = 0
+    
+    # 📌 တွက်ချက်မှု အသစ်စတင်ခြင်း
+    total_income = grand_total_collected + transferred_in
+    total_outflow = total_spent + transferred_out
+    net_in_hand = total_income - total_outflow
     
     # 💬 ၆။ Message တည်ဆောက်ခြင်း
-    if assigned_students_count == 0 and grand_total_collected == 0 and total_spent == 0 and not archived_fund_totals:
+    if assigned_students_count == 0 and total_income == 0 and total_outflow == 0 and not archived_fund_totals:
         return await update.message.reply_text("⚠️ သင်သည် EC စာရင်းတွင် မရှိပါ သို့မဟုတ် ရငွေ/သုံးငွေ မှတ်တမ်း မရှိပါ။")
 
     msg = f"📊 <b>EC DASHBOARD - @{username if username else query_name}</b>\n"
     msg += f"━━━━━━━━━━━━━━━━━━\n"
     msg += f"👥 တာဝန်ယူထားသော ကျောင်းသား: <b>{assigned_students_count}</b> ဦး\n\n"
     
-    msg += f"<b>[ 🎯 လက်ရှိ ကောက်ခံရရှိမှု (Active) ]</b>\n"
+    msg += f"<b>[ 🎯 ရငွေစာရင်း (Income) ]</b>\n"
     if active_fund_totals:
         for f_id, f_amt in active_fund_totals.items():
             display_name = fund_name_map.get(f_id, f_id)
@@ -429,11 +551,20 @@ async def ec_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         msg += "<i>လက်ရှိ ကောက်ခံထားသော ငွေမရှိသေးပါ</i>\n"
         
-    msg += f"📥 <b>စုစုပေါင်း ရငွေ: {grand_total_collected:,} MMK</b>\n\n"
+    if transferred_in > 0:
+        msg += f"• အခြား EC များထံမှ လက်ခံရရှိငွေ: <b>{transferred_in:,} MMK</b>\n"
+        
+    msg += f"📥 <b>စုစုပေါင်း ရငွေ: {total_income:,} MMK</b>\n\n"
     
-    msg += f"<b>[ 💸 သုံးစွဲမှုနှင့် လက်ကျန် ]</b>\n"
-    msg += f"📤 သုံးစွဲပြီးငွေ: <b>{total_spent:,} MMK</b>\n"
-    msg += f"💰 <b>လက်ထဲတွင် ကျန်ငွေ: {net_in_hand:,} MMK</b>\n"
+    msg += f"<b>[ 💸 သုံးစွဲမှုနှင့် ထွက်ငွေ (Outflow) ]</b>\n"
+    msg += f"• သုံးစွဲပြီးငွေ (Spent): <b>{total_spent:,} MMK</b>\n"
+    
+    if transferred_out > 0:
+        msg += f"• အခြား EC များသို့ လွှဲပြောင်းပေးငွေ: <b>{transferred_out:,} MMK</b>\n"
+        
+    msg += f"📤 <b>စုစုပေါင်း ထွက်ငွေ: {total_outflow:,} MMK</b>\n\n"
+    
+    msg += f"💰 <b>လက်ထဲတွင် ကျန်ငွေ (Net Balance): {net_in_hand:,} MMK</b>\n"
     
     if archived_fund_totals:
         msg += f"\n📦 <b>[ ဆရာမထံ အပ်နှံပြီးသော ရန်ပုံငွေများ ]</b>\n"
@@ -564,3 +695,114 @@ async def unarchive_fund_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
     else:
         await update.message.reply_text(f"⚠️ <code>{fund_id}</code> အမည်ဖြင့် ရန်ပုံငွေ ရှာမတွေ့ပါ။", parse_mode=ParseMode.HTML)
+
+# ================= 📊 Fund အသေးစိတ်ကြည့်ရန် (/fundstat) =================
+async def fundstat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_super_admin(update.effective_user.id): return
+
+    args = context.args
+    if len(args) < 1:
+        return await update.message.reply_text(
+            "⚠️ <b>အသုံးပြုနည်း:</b> <code>/fundstat &lt;fund_id&gt;</code>\n(ဥပမာ - /fundstat math)", 
+            parse_mode=ParseMode.HTML
+        )
+
+    fund_id = args[0].lower()
+    db = get_db()
+
+    fund_info = await db.funds.find_one({"fund_id": re.compile(f"^{fund_id}$", re.IGNORECASE)})
+    if not fund_info:
+        return await update.message.reply_text("⚠️ ထို Fund ကို ရှာမတွေ့ပါ။", parse_mode=ParseMode.HTML)
+
+    fund_name = fund_info.get("fund_name", fund_id.capitalize())
+    target_amount = fund_info.get("target_amount", 0)
+    manager = fund_info.get("managed_by", "ec")
+
+    all_students = await db.student_info.find({}).to_list(length=None)
+
+    ec_collections = {}
+    total_collected = 0
+    unpaid_count = 0
+
+    for st in all_students:
+        roll_no = st.get("roll_no", "")
+        short_roll = roll_no.split("-")[-1] if "-" in roll_no else roll_no[-2:]
+
+        paid_data = st.get("paid_funds", {}).get(fund_id)
+        
+        if not paid_data:
+            unpaid_count += 1
+            continue
+
+        amount_paid = 0
+        
+        if isinstance(paid_data, dict):
+            amount_paid = paid_data.get("amount", 0)
+            collected_by_data = paid_data.get("collected_by", "ec")
+            
+            # Architecture အသစ် (Dictionary Breakdown)
+            if isinstance(collected_by_data, dict):
+                for ec_name, ec_amt in collected_by_data.items():
+                    if ec_amt > 0:
+                        display_ec = ec_name.capitalize()
+                        if display_ec not in ec_collections:
+                            # Set ကိုအသုံးပြု၍ Roll No များ Duplicate မဖြစ်အောင် ကာကွယ်မည်
+                            ec_collections[display_ec] = {"amount": 0, "rolls": set()}
+                        
+                        ec_collections[display_ec]["amount"] += ec_amt
+                        ec_collections[display_ec]["rolls"].add(short_roll)
+            
+            # Architecture အဟောင်း (String)
+            elif isinstance(collected_by_data, str):
+                if amount_paid > 0:
+                    display_ec = collected_by_data.capitalize()
+                    if display_ec not in ec_collections:
+                        ec_collections[display_ec] = {"amount": 0, "rolls": set()}
+                    ec_collections[display_ec]["amount"] += amount_paid
+                    ec_collections[display_ec]["rolls"].add(short_roll)
+
+        # အလွန်ဟောင်းသော (Integer) Data
+        elif isinstance(paid_data, (int, float)):
+            amount_paid = paid_data
+            if amount_paid > 0:
+                display_ec = st.get("assigned_ec", "ec").capitalize()
+                if display_ec not in ec_collections:
+                    ec_collections[display_ec] = {"amount": 0, "rolls": set()}
+                ec_collections[display_ec]["amount"] += amount_paid
+                ec_collections[display_ec]["rolls"].add(short_roll)
+
+        if amount_paid > 0:
+            total_collected += amount_paid
+        else:
+            unpaid_count += 1
+
+    # UI ပုံဖော်ခြင်း
+    msg = f"📊 <b>FUND REPORT: {fund_name}</b>\n"
+    msg += f"🎯 Target Amount: {target_amount:,} MMK / student\n"
+    msg += f"👤 Manager: <b>@{manager}</b>\n"
+    msg += f"━━━━━━━━━━━━━━━━━━\n\n"
+
+    msg += f"📥 <b>EC များ၏ ကောက်ခံပေးသွင်းမှု:</b>\n"
+    if ec_collections:
+        for ec_name, data in ec_collections.items():
+            count = len(data['rolls'])
+            msg += f"• {ec_name}: {data['amount']:,} MMK ({count} ဦး)\n"
+    else:
+        msg += "<i>လက်ရှိ ကောက်ခံရရှိထားသော ငွေမရှိသေးပါ</i>\n"
+        
+    msg += f"💰 <b>စုစုပေါင်း ကောက်ခံရငွေ: {total_collected:,} MMK</b>\n\n"
+    
+    msg += f"━━━━━━━━━━━━━━━━━━\n\n"
+
+    msg += f"✅ <b>ပေးချေပြီးသော ကျောင်းသားများ (Roll No):</b>\n"
+    if ec_collections:
+        for ec_name, data in ec_collections.items():
+            # Set ကို List ပြောင်း၍ အစီအစဉ်ကျအောင် စီမည်
+            rolls_str = ", ".join(sorted(list(data["rolls"])))
+            msg += f"{ec_name} : {rolls_str}\n"
+    else:
+        msg += "<i>မရှိသေးပါ</i>\n"
+
+    msg += f"\n❌ မပေးရသေးသော ကျောင်းသားများ: <b>{unpaid_count}</b> ဦး"
+
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
