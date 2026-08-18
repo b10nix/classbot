@@ -201,8 +201,13 @@ async def dates_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
     if db is None: return
     
     if data.startswith("vdate_show_") or data.startswith("vdate_abs_"):
-        # Format: vdate_[show|abs]_[pin]_[page]
-        mode, _, pin, page_str = data.split("_", 3)
+        # Correctly split into 4 parts: prefix, mode, pin, page_str
+        parts = data.split("_", 3)
+        prefix = parts[0]   # 'vdate'
+        mode = parts[1]     # 'show' or 'abs'
+        pin = parts[2]      # The 6-digit pin
+        page_str = parts[3] # The page number
+        
         page = int(page_str)
         
         record = await db.attendance_records.find_one({"pin_code": pin})
