@@ -3,7 +3,7 @@ import random
 import logging
 from datetime import datetime, timedelta, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram.ext import ContextTypes, ConversationHandler
 from telegram.constants import ParseMode
 from database.db import get_db
 
@@ -15,9 +15,11 @@ ROLL_PIN_INPUT = 1
 # ================= HELPER FUNCTIONS =================
 async def is_ec_check(user_id: int) -> bool:
     """လက်ရှိ Approvers စာရင်းဝင် Admin များနှင့် Owner ကို EC ဟု သတ်မှတ်ပါသည်"""
-    if user_id == OWNER_ID: return True
+    if user_id == OWNER_ID: 
+        return True
     db = get_db()
-    if db is None: return False
+    if db is None: 
+        return False
     approver = await db.approvers.find_one({"user_id": user_id})
     return True if approver else False
 
@@ -84,8 +86,11 @@ async def rollcall_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = get_db()
     if db is None: return ConversationHandler.END
     
-    # Database ထဲမှာ ကျောင်းသားစာရင်း ရှိ/မရှိ စစ်ဆေးခြင်း
-    student = await db.students.find_one({"user_id": user_id})
+    # 📌 db.students အစား db.student_info ကို ပြောင်းသုံးပြီး tg_id ပါ စစ်ဆေးမည်
+    student = await db.student_info.find_one({
+        "$or": [{"tg_id": user_id}, {"user_id": user_id}]
+    })
+    
     if not student:
         await update.message.reply_text("❌ <b>ခွင့်ပြုချက်မရှိပါ</b>\n\nသင့်အား စာရင်းသွင်းထားခြင်း မရှိပါ။ Admin ထံ ဆက်သွယ်ပါ။", parse_mode=ParseMode.HTML)
         return ConversationHandler.END
@@ -112,24 +117,26 @@ async def rollcall_receive_pin(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("⚠️ သင်သည် ဤအတန်းအတွက် စာရင်းသွင်းပြီးသား ဖြစ်ပါသည်ဗျာ။")
         return ConversationHandler.END
         
-    # ကျောင်းသား အချက်အလက် ယူခြင်း
-    student = await db.students.find_one({"user_id": user_id})
+    # 📌 db.students အစား db.student_info သုံးမည်
+    student = await db.student_info.find_one({
+        "$or": [{"tg_id": user_id}, {"user_id": user_id}]
+    })
     mm_tz = timezone(timedelta(hours=6, minutes=30))
     now_time = datetime.now(mm_tz).strftime("%I:%M %p")
     
     user_data = {
         "user_id": user_id,
-        "roll_no": student["roll_no"],
-        "name": student["name"],
+        "roll_no": student.get("roll_no", "Unknown"),
+        "name": student.get("name", "Unknown"),
         "time": now_time
     }
     
     # DB ထဲသို့ တက်ရောက်သူစာရင်း တိုးထည့်ခြင်း
     await db.attendance_records.update_one({"pin_code": pin_input}, {"$push": {"present_users": user_data}})
     
-    short_roll = get_short_roll(student["roll_no"])
+    short_roll = get_short_roll(student.get("roll_no", ""))
     await update.message.reply_text(
-        f"✅ <b>ROLL CALL အောင်မြင်ပါသည်</b>\n━━━━━━━━━━━━━━━━━\n🆔 Roll No: <b>{short_roll}</b>\n👤 Name: <b>{student['name']}</b>\n🕒 Time: <code>{now_time}</code>\n📅 Date: <code>{record['date']}</code>",
+        f"✅ <b>ROLL CALL အောင်မြင်ပါသည်</b>\n━━━━━━━━━━━━━━━━━\n🆔 Roll No: <b>{short_roll}</b>\n👤 Name: <b>{student.get('name', 'Unknown')}</b>\n🕒 Time: <code>{now_time}</code>\n📅 Date: <code>{record.get('date', '')}</code>",
         parse_mode=ParseMode.HTML
     )
     return ConversationHandler.END
@@ -165,8 +172,8 @@ async def show_dates_page(update_or_query, context: ContextTypes.DEFAULT_TYPE, p
     
     kb = []
     for r in page_records:
-        date_str = r["date"]
-        pin = r["pin_code"]
+        date_str = r.get("date", "Unknown Date")
+        pin = r.get("pin_code", "000000")
         count = len(r.get("present_users", []))
         kb.append([InlineKeyboardButton(f"📅 {date_str} (PIN: {pin}) -> Total: {count}", callback_data=f"vdate_show_{pin}_{page}")])
         
@@ -201,14 +208,11 @@ async def dates_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
     if db is None: return
     
     if data.startswith("vdate_show_") or data.startswith("vdate_abs_"):
-        # Correctly split into 4 parts: prefix, mode, pin, page_str
+        # 📌 Format အမှန် ခွဲထုတ်ခြင်း (Bug Fix)
         parts = data.split("_", 3)
-        prefix = parts[0]   # 'vdate'
         mode = parts[1]     # 'show' or 'abs'
-        pin = parts[2]      # The 6-digit pin
-        page_str = parts[3] # The page number
-        
-        page = int(page_str)
+        pin = parts[2]      # PIN code
+        page = int(parts[3]) # Page number
         
         record = await db.attendance_records.find_one({"pin_code": pin})
         if not record: return
@@ -217,39 +221,46 @@ async def dates_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         
         if mode == "show":
             # 🟢 PRESENT LIST ပြသခြင်း
-            txt = f"📅 <b>ATTENDANCE REPORT: {record['date']}</b>\n"
+            txt = f"📅 <b>ATTENDANCE REPORT: {record.get('date', '')}</b>\n"
             txt += f"🔢 PIN Code: <code>{pin}</code>\n"
             txt += f"🟢 တက်ရောက်သူ (Present) စာရင်း:\n━━━━━━━━━━━━━━━━━━\n"
             
             # Short Roll No အလိုက် စီခြင်း
-            present_list.sort(key=lambda x: int(get_short_roll(x['roll_no'])) if get_short_roll(x['roll_no']).isdigit() else 999)
+            present_list.sort(key=lambda x: int(get_short_roll(x.get('roll_no', '0'))) if get_short_roll(x.get('roll_no', '0')).isdigit() else 999)
             
             if not present_list:
                 txt += "<i>(တက်ရောက်သူ မရှိပါ)</i>"
             for u in present_list:
-                txt += f"✅ {get_short_roll(u['roll_no'])} - {u['name']} (<code>{u['time']}</code>)\n"
+                txt += f"✅ {get_short_roll(u.get('roll_no', ''))} - {u.get('name', '')} (<code>{u.get('time', '')}</code>)\n"
                 
             kb = [[InlineKeyboardButton("❌ ပျက်ကွက်သူ (Absent) စာရင်းကြည့်ရန်", callback_data=f"vdate_abs_{pin}_{page}")]]
             kb.append([InlineKeyboardButton("🔙 Back to Dates", callback_data=f"vdate_p_{page}")])
             await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
             
         elif mode == "abs":
-            # 🔴 ABSENT LIST ပြသခြင်း
-            all_students = await db.students.find({}).to_list(length=None)
-            present_ids = [u["user_id"] for u in present_list]
+            # 🔴 ABSENT LIST ပြသခြင်း (db.students အစား db.student_info သုံးမည်)
+            all_students = await db.student_info.find({}).to_list(length=None)
             
-            absent_list = [s for s in all_students if s["user_id"] not in present_ids]
-            absent_list.sort(key=lambda x: int(get_short_roll(x['roll_no'])) if get_short_roll(x['roll_no']).isdigit() else 999)
+            absent_list = []
+            present_ids = [u.get("user_id") for u in present_list]
             
-            txt = f"📅 <b>ATTENDANCE REPORT: {record['date']}</b>\n"
+            for s in all_students:
+                s_id = s.get("user_id") or s.get("tg_id")
+                if s_id not in present_ids:
+                    absent_list.append(s)
+            
+            absent_list.sort(key=lambda x: int(get_short_roll(x.get('roll_no', '0'))) if get_short_roll(x.get('roll_no', '0')).isdigit() else 999)
+            
+            txt = f"📅 <b>ATTENDANCE REPORT: {record.get('date', '')}</b>\n"
             txt += f"🔢 PIN Code: <code>{pin}</code>\n"
             txt += f"🔴 ပျက်ကွက်သူ (Absent) စာရင်း:\n━━━━━━━━━━━━━━━━━━\n"
             
             if not absent_list:
                 txt += "🎉 <i>ကျောင်းသားအားလုံး တက်ရောက်ကြသည်။ (All Present!)</i>"
             for s in absent_list:
-                txt += f"❌ {get_short_roll(s['roll_no'])} - {s['name']}\n"
+                txt += f"❌ {get_short_roll(s.get('roll_no', ''))} - {s.get('name', '')}\n"
                 
             kb = [[InlineKeyboardButton("🟢 တက်ရောက်သူ (Present) စာရင်းကြည့်ရန်", callback_data=f"vdate_show_{pin}_{page}")]]
             kb.append([InlineKeyboardButton("🔙 Back to Dates", callback_data=f"vdate_p_{page}")])
             await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
+            
