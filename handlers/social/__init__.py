@@ -9,7 +9,7 @@ from .posts import (
 from .approval import admin_approval_action
 
 from .nickname import (
-    nickname_start, nickname_receive, nickname_action
+    nickname_start, nickname_receive, nickname_action, reset_nickname_quota_cmd
 )
 
 from .reply import reply_start, reply_receive

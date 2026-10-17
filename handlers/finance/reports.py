@@ -78,70 +78,83 @@ async def hostel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= 🏦 ရန်ပုံငွေ အခြေအနေချုပ် (/vault) =================
 async def vault_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_super_admin(update.effective_user.id): 
-        return 
-    
-    db = get_db() 
-    funds = await db.funds.find({}).to_list(length=None) 
-    if not funds: 
-        return await update.message.reply_text("ရန်ပုံငွေ ခေါင်းစဉ်များ မရှိသေးပါ။") 
-    
-    students = await db.student_info.find({}).to_list(length=None) 
-    
-    # 📌 Archive လုပ်ထားသော Fund များကို ရှာဖွေခြင်း
-    archived_fund_ids = set()
-    for f in funds:
-        if f.get("status") == "archived":
-            archived_fund_ids.add(f.get("fund_id", "").lower())
-            
-    sys_config = await db.sys_config.find_one({"type": "archived_funds"})
-    if sys_config:
-        for f_id in sys_config.get("funds", []):
-            archived_fund_ids.add(f_id.lower())
+    """
+    Displays the current class vault summary including:
+    - Opening/Carry-over Balance
+    - Active Collections (Student Payments)
+    - Total EC Expenses
+    - Net Vault Balance
+    """
+    db = get_db()
+    if db is None:
+        return await update.message.reply_text("❌ Database connection error.")
 
-    active_msg = "🏦 <b>VAULT (လက်ရှိ ရန်ပုံငွေ အခြေအနေ)</b>\n━━━━━━━━━━━━━━\n"
-    archive_msg = "\n📦 <b>ဆရာမထံ အပ်နှံပြီးသော ရန်ပုံငွေများ (Archived)</b>\n━━━━━━━━━━━━━━\n"
-    
-    grand_total = 0 
-    archive_total = 0
-    has_archive = False
-    
-    for f in funds: 
-        f_id = f.get("fund_id") 
-        if not f_id: 
-            continue 
-        
-        clean_f_id = f_id.lower()
-        f_name = f.get("fund_name", f_id) 
-        
-        # 📌 amount တွက်ချက်ခြင်း
-        total = 0
-        for s in students:
-            f_data = s.get("paid_funds", {}).get(clean_f_id) or s.get("paid_funds", {}).get(f_id, 0)
-            total += extract_paid_amount(f_data)
-        
-        if clean_f_id in archived_fund_ids:
-            has_archive = True
-            archive_total += total
-            archive_msg += f"📦 <b>{f_name}</b>: {total:,} MMK\n"
-        else:
-            grand_total += total 
-            active_msg += f"💰 <b>{f_name}</b>: {total:,} MMK\n" 
-            
-    ledgers = await db.ec_ledgers.find({}).to_list(length=None)
-    total_ec_spent = sum(ledger.get("total_spent", 0) for ledger in ledgers)
-    net_balance = grand_total - total_ec_spent
+    # 1. Fetch Carry-over / Opening Balance
+    # First priority: fund_transactions collection
+    opening_tx = await db.fund_transactions.find_one({
+        "$or": [
+            {"type": "opening_balance"},
+            {"is_opening": True}
+        ]
+    })
 
-    active_msg += f"\n📥 <b>စုစုပေါင်း ကောက်ခံရငွေ: {grand_total:,} MMK</b>\n" 
-    active_msg += f"📤 <b>EC များ သုံးစွဲပြီးငွေ: {total_ec_spent:,} MMK</b>\n"
-    active_msg += f"📊 <b>လက်ကျန်ငွေ (Net Balance): {net_balance:,} MMK</b>"
-    
-    final_msg = active_msg
-    if has_archive:
-        archive_msg += f"\n📊 <b>အပ်နှံပြီး စုစုပေါင်း: {archive_total:,} MMK</b>"
-        final_msg += "\n" + archive_msg
-        
-    await update.message.reply_text(final_msg, parse_mode=ParseMode.HTML)
+    carry_over_amount = 0.0
+    semester_label = "Current"
+
+    if opening_tx:
+        carry_over_amount = float(opening_tx.get("amount", 0.0))
+        desc = opening_tx.get("description", "")
+        if "from " in desc:
+            semester_label = desc.split("from ")[-1].strip()
+    else:
+        # Fallback priority: funds collection
+        opening_fund = await db.funds.find_one({"type": "opening_balance"})
+        if opening_fund:
+            carry_over_amount = float(opening_fund.get("amount") or opening_fund.get("target_amount") or 0.0)
+            semester_label = opening_fund.get("fund_id", "").replace("opening_", "")
+
+    # 2. Fetch Active Funds (Exclude archived)
+    all_funds = await db.funds.find({}).to_list(length=None)
+    archived_fund_ids = {
+        str(f.get("fund_id", "")).lower() 
+        for f in all_funds 
+        if f.get("status") == "archived"
+    }
+
+    # 3. Calculate Total Active Student Collections
+    students = await db.student_info.find({}).to_list(length=None)
+    total_collected = 0.0
+
+    for st in students:
+        paid_funds = st.get("paid_funds", {})
+        for f_id, f_data in paid_funds.items():
+            if str(f_id).lower() not in archived_fund_ids:
+                amt = f_data.get("amount", 0) if isinstance(f_data, dict) else f_data
+                if isinstance(amt, (int, float)):
+                    total_collected += float(amt)
+
+    # 4. Calculate Total EC Expenses
+    ec_ledgers = await db.ec_ledgers.find({}).to_list(length=None)
+    total_spent = 0.0
+    for ec in ec_ledgers:
+        spent = ec.get("total_spent", 0)
+        if isinstance(spent, (int, float)):
+            total_spent += float(spent)
+
+    # 5. Compute Net Vault Balance
+    # Net = Opening Balance + Collections - Expenses
+    net_balance = (carry_over_amount + total_collected) - total_spent
+
+    msg = (
+        f"🏦 <b>VAULT (လက်ရှိ ရန်ပုံငွေ အခြေအနေ)</b>\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"💰 <b>Carry-over Balance ({semester_label}):</b> {carry_over_amount:,.0f} MMK\n\n"
+        f"📥 <b>စုစုပေါင်း ကောက်ခံရငွေ:</b> {total_collected:,.0f} MMK\n"
+        f"📤 <b>EC များ သုံးစွဲပြီးငွေ:</b> {total_spent:,.0f} MMK\n"
+        f"📊 <b>လက်ကျန်ငွေ (Net Balance):</b> {net_balance:,.0f} MMK"
+    )
+
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 # ================= 📊 ရန်ပုံငွေ အခြေအနေခွဲကြည့်ရန် (/report) =================
 async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):

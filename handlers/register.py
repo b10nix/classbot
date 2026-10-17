@@ -15,13 +15,19 @@ from handlers.tools.weather import weather_cmd
 from handlers.student.student_data import inline_search, add_dummy_data
 
 # 📌 Fund & Reports Imports
-from handlers.finance.fund_admin import newfund_cmd, payfund_cmd, setphone_cmd, delfund_cmd, settg_cmd, undo_cmd, history_cmd 
-from handlers.finance.reports import list_cmd, report_cmd, vault_cmd, hostel_cmd, export_cmd, remind_cmd, export_fund_cmd
+from handlers.finance.fund_admin import (
+    newfund_cmd, payfund_cmd, setphone_cmd, delfund_cmd, 
+    settg_cmd, undo_cmd, history_cmd
+)
+from handlers.finance.reports import (
+    list_cmd, report_cmd, vault_cmd, hostel_cmd, 
+    export_cmd, remind_cmd, export_fund_cmd
+)
 
 # 📌 User Registration Imports
 from handlers.student.user import user_add_start, user_add_hostel_callback, user_set_phone, ADD_HOSTEL
 
-# Fianance & Fund Management Imports
+# 📌 Finance & Fund Management Imports
 from handlers.finance.finance_tools import (
     allocate_fund, spend_cmd, assign_ec_cmd, ec_me, nuke_funds_cmd,
     ecstat_cmd, archive_fund_cmd, unarchive_fund_cmd, export_finance_report, fundstat_cmd
@@ -60,12 +66,15 @@ from handlers.admin.admin_settings import (
     approvers_cmd, approvers_callback, add_approver_receive
 )
 
+# 📌 End Semester
+from handlers.admin.endsemester import end_semester_cmd
+
 # 📌 Social Features
 from handlers.social import (
     confess_start, confess_receive, confess_action,
     c1_start, c1_receive_msg, c1_receive_name, c1_action,
     post_start, post_receive, post_action, post999_cmd, admin_approval_action,
-    nickname_start, nickname_receive, nickname_action,
+    nickname_start, nickname_receive, nickname_action, reset_nickname_quota_cmd,
     reply_start, reply_receive
 )
 
@@ -219,7 +228,8 @@ def register_all_handlers(app):
     app.add_handler(CommandHandler('addegg', add_egg))
     app.add_handler(CommandHandler('delegg', del_egg))
     app.add_handler(CommandHandler("post999", post999_cmd))
-
+    app.add_handler(CommandHandler("resetnick", reset_nickname_quota_cmd))
+    
     app.add_handler(CommandHandler('attendance', start_attendance_cmd))
     app.add_handler(CommandHandler('dates', view_dates_cmd))
     app.add_handler(CallbackQueryHandler(close_attendance_action, pattern="^att_close_"))
@@ -278,6 +288,9 @@ def register_all_handlers(app):
     app.add_handler(CommandHandler('export', export_cmd))
     app.add_handler(CommandHandler('exportfund', export_fund_cmd))
     app.add_handler(CommandHandler('remind', remind_cmd))
+
+    # 📌 End Semester Command
+    app.add_handler(CommandHandler('endsemester', end_semester_cmd))
 
     MAJORS = ["it", "mc", "archi", "ep", "ec", "mech", "civil"]
     for major in MAJORS:

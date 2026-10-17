@@ -28,26 +28,54 @@ from utils.security import (
 
 logger = logging.getLogger(__name__)
 
-# ================= ANONYMOUS CONFESSION (/confess1) =================
-async def confess_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def enforce_private_chat_and_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """
+    Validates class group membership and ensures interaction only occurs in private chat (DM).
+    If invoked in a public group, warns the user and schedules deletion of both the command 
+    and the bot response within 10 seconds.
+    """
     user_id = update.effective_user.id
+    chat = update.effective_chat
+    
+    # 1. Class Group Member Authorization Check
     allowed_groups = await get_allowed_groups(user_id, context)
     if not allowed_groups:
-        await update.message.reply_text(
+        denied_msg = await update.message.reply_text(
             "⛔ <b>Access Denied:</b> ဤ Feature ကို Class Group Member များသာ အသုံးပြုခွင့်ရှိပါသည်။", 
             parse_mode=ParseMode.HTML
         )
+        if chat.type != 'private':
+            schedule_delete(context, chat.id, update.message.message_id, 10)
+            schedule_delete(context, chat.id, denied_msg.message_id, 10)
+        return False
+
+    # 2. Private Chat (DM) Enforcement
+    if chat.type != 'private':
+        bot_username = context.bot.username
+        dm_link = f"https://t.me/{bot_username}"
+        warn_text = (
+            f"⚠️ ဤ Command ကို Bot ၏ DM (Private Chat) တွင်သာ အသုံးပြုနိုင်ပါသည်။\n"
+            f"👉 <a href='{dm_link}'>ဒီနေရာကိုနှိပ်၍ DM တွင် စတင်ပါ</a>"
+        )
+        warn_msg = await update.message.reply_text(
+            warn_text, 
+            parse_mode=ParseMode.HTML, 
+            disable_web_page_preview=True
+        )
+        # Delete both user command and warning notification within 10 seconds
+        schedule_delete(context, chat.id, update.message.message_id, 10)
+        schedule_delete(context, chat.id, warn_msg.message_id, 10)
+        return False
+
+    return True
+
+
+# ================= ANONYMOUS CONFESSION (/confess1) =================
+async def confess_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await enforce_private_chat_and_membership(update, context):
         return ConversationHandler.END
-    
-    if update.effective_chat.type != 'private':
-        try: 
-            await update.message.delete()
-        except Exception: 
-            pass
-        warn = await update.message.reply_text("⚠️ DM Access Only.")
-        schedule_delete(context, update.effective_chat.id, warn.message_id, 5)
-        return ConversationHandler.END
-        
+
+    user_id = update.effective_user.id
     daily_ok, limit_count = await check_daily_limit(user_id)
     if not daily_ok:
         warn = await update.message.reply_text(
@@ -112,10 +140,8 @@ async def confess_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log_msg_id = None
             
             if db is not None:
-                # 📌 1. Master Log အတွက် Dynamic Link (tg://user?id= + @username)
                 display_user = get_safe_user_link(user)
                 
-                # 📌 2. Master Log Group သို့ အပြည့်အစုံ ပို့ဆောင်ခြင်း
                 if LOG_GROUP_ID != 0:
                     log_txt = (
                         f"🟡 <b>{log_id} • CONFESSION (ANON)</b>\n\n"
@@ -135,13 +161,11 @@ async def confess_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as e:
                         logger.error(f"Failed to send log to LOG_GROUP_ID: {e}")
                 
-                # 📌 3. Approvers စာရင်းရှာဖွေခြင်း
                 approvers = await db.approvers.find({}).to_list(length=None)
                 approver_ids = [a['user_id'] for a in approvers]
                 if OWNER_ID not in approver_ids: 
                     approver_ids.append(OWNER_ID)
                 
-                # 📌 4. Admin DM အတွက် Emoji/Nickname Identity သာ သုံးခြင်း (User ID / Username ဖျောက်ထားသည်)
                 identity = await get_user_identity(user_id)
                 dm_txt = (
                     f"🚨 <b>PENDING CONFESSION</b>\n"
@@ -162,16 +186,15 @@ async def confess_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception: 
                         pass
                     
-                # 📌 5. DB သို့ Raw Metadata Snapshot အနေဖြင့် သိမ်းဆည်းခြင်း
                 await db.pending_posts.insert_one({
                     "post_id": post_id, 
                     "type": "confess_anon", 
                     "msg": msg, 
-                    "target": target,
+                    "target": target, 
                     "sender_id": user_id, 
-                    "sender_first_name": first_name,
-                    "sender_username": username,
-                    "time": get_mm_time(),
+                    "sender_first_name": first_name, 
+                    "sender_username": username, 
+                    "time": get_mm_time(), 
                     "admin_msgs": admin_msgs, 
                     "log_msg_id": log_msg_id
                 })
@@ -192,13 +215,27 @@ async def confess_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     return ConversationHandler.END
 
+
 # ================= CUSTOM CONFESSION (/confess) =================
 async def c1_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    allowed_groups = await get_allowed_groups(user_id, context)
-    if not allowed_groups: 
+    if not await enforce_private_chat_and_membership(update, context):
         return ConversationHandler.END
     
+    user_id = update.effective_user.id
+    daily_ok, limit_count = await check_daily_limit(user_id)
+    if not daily_ok:
+        warn = await update.message.reply_text(
+            f"🚫 <b>DAILY LIMIT REACHED</b>\n\nယနေ့အတွက် သတ်မှတ်ထားသော ကန့်သတ်ချက် (<b>{limit_count}</b> ခု) ပြည့်သွားပါပြီ။", 
+            parse_mode=ParseMode.HTML
+        )
+        schedule_delete(context, update.effective_chat.id, warn.message_id, 15)
+        return ConversationHandler.END
+
+    remain_sec = await check_user_cooldown(user_id)
+    if remain_sec > 0:
+        await show_cooldown_warning(update, remain_sec, context)
+        return ConversationHandler.END
+
     kb = [[InlineKeyboardButton("❌ Cancel", callback_data="cancel_c1")]]
     prompt = await update.message.reply_text(
         "<b>🎭 CONFESSION SYSTEM (NAME REQUIRED)</b>\n<pre>Enter your confession message:</pre>", 
@@ -266,10 +303,8 @@ async def c1_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log_msg_id = None
             
             if db is not None:
-                # 📌 1. Master Log အတွက် Dynamic Link
                 display_user = get_safe_user_link(user)
                 
-                # 📌 2. Log Group သို့ ပို့ဆောင်ခြင်း
                 if LOG_GROUP_ID != 0:
                     log_txt = (
                         f"🟡 <b>{log_id} • CONFESSION (CUSTOM)</b>\n\n"
@@ -289,13 +324,11 @@ async def c1_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as e:
                         logger.error(f"Failed to send log to LOG_GROUP_ID: {e}")
                         
-                # 📌 3. Approvers ရှာဖွေခြင်း
                 approvers = await db.approvers.find({}).to_list(length=None)
                 approver_ids = [a['user_id'] for a in approvers]
                 if OWNER_ID not in approver_ids: 
                     approver_ids.append(OWNER_ID)
                 
-                # 📌 4. Admin DM အတွက် Emoji/Nickname Identity သာ သုံးခြင်း (User ID / Username ဖျောက်ထားသည်)
                 identity = await get_user_identity(user_id)
                 dm_txt = (
                     f"🚨 <b>PENDING CONFESSION (CUSTOM)</b>\n"
@@ -317,17 +350,16 @@ async def c1_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception: 
                         pass
                     
-                # 📌 5. DB သို့ Raw Metadata Snapshot ဖြင့် သိမ်းဆည်းခြင်း
                 await db.pending_posts.insert_one({
                     "post_id": post_id, 
                     "type": "confess_custom", 
                     "msg": msg, 
                     "target": target, 
-                    "name": name,
+                    "name": name, 
                     "sender_id": user_id, 
-                    "sender_first_name": first_name,
-                    "sender_username": user.username,
-                    "time": get_mm_time(),
+                    "sender_first_name": first_name, 
+                    "sender_username": user.username, 
+                    "time": get_mm_time(), 
                     "admin_msgs": admin_msgs, 
                     "log_msg_id": log_msg_id
                 })
@@ -348,13 +380,27 @@ async def c1_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     return ConversationHandler.END
 
+
 # ================= POST SYSTEM (/post) =================
 async def post_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    allowed_groups = await get_allowed_groups(user_id, context)
-    if not allowed_groups: 
+    if not await enforce_private_chat_and_membership(update, context):
         return ConversationHandler.END
-    
+
+    user_id = update.effective_user.id
+    daily_ok, limit_count = await check_daily_limit(user_id)
+    if not daily_ok:
+        warn = await update.message.reply_text(
+            f"🚫 <b>DAILY LIMIT REACHED</b>\n\nယနေ့အတွက် သတ်မှတ်ထားသော ကန့်သတ်ချက် (<b>{limit_count}</b> ခု) ပြည့်သွားပါပြီ။", 
+            parse_mode=ParseMode.HTML
+        )
+        schedule_delete(context, update.effective_chat.id, warn.message_id, 15)
+        return ConversationHandler.END
+
+    remain_sec = await check_user_cooldown(user_id)
+    if remain_sec > 0:
+        await show_cooldown_warning(update, remain_sec, context)
+        return ConversationHandler.END
+
     kb = [[InlineKeyboardButton("❌ Cancel", callback_data="cancel_post")]]
     prompt = await update.message.reply_text(
         "<b>💬 SECURE POST SYSTEM</b>\n<pre>Enter your post message:</pre>", 
@@ -373,7 +419,7 @@ async def post_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     markup = await build_target_keyboard(update.effective_user.id, context, "send_post", "cancel_post")
     await update.message.reply_text(
-        f"<b>📝 VERIFY & SELECT TARGET</b>\n<pre>{html.escape(update.message.text)}</pre>",
+        f"<b>📝 VERIFY & SELECT TARGET</b>\n<pre>{html.escape(update.message.text)}</pre>", 
         reply_markup=markup, parse_mode=ParseMode.HTML
     )
     return State.POST_CONFIRM
@@ -406,7 +452,6 @@ async def post_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db = get_db()
             published_targets = []
             
-            # 📌 Log Group သို့ အမိုက်စား UI ဖြင့် ပို့ဆောင်ခြင်း (Direct Post)
             if LOG_GROUP_ID != 0:
                 display_user = get_safe_user_link(user)
                 log_txt = (
@@ -438,15 +483,16 @@ async def post_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if published_targets and db is not None:
                 await db.published_posts.insert_one({
-                    "post_id": post_id,
-                    "signature": identity,
-                    "sender_id": user_id,
-                    "sender_first_name": first_name,
-                    "sender_username": username,
+                    "post_id": post_id, 
+                    "signature": identity, 
+                    "sender_id": user_id, 
+                    "sender_first_name": first_name, 
+                    "sender_username": username, 
                     "targets": published_targets
                 })
                 
             await update_user_cooldown(user_id)
+            await increment_daily_limit(user_id)
             await query.edit_message_text("<pre>✅ POST DELIVERED SUCCESSFULLY.</pre>", parse_mode=ParseMode.HTML)
             schedule_delete(context, query.message.chat_id, query.message.message_id, 7)
         else:
@@ -459,6 +505,7 @@ async def post_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         schedule_delete(context, query.message.chat_id, query.message.message_id, 5)
         
     return ConversationHandler.END
+
 
 # ================= 👻 HIDDEN FEATURE: GHOST POST (/post999) =================
 async def post999_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):

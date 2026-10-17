@@ -1,6 +1,30 @@
- .env
-__pycache__/
-*.pyc
-.vscode/
+# Environment & Secrets
 .env
+.env.*
+*.env
+config.json
+secrets.py
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
 venv/
+.venv/
+env/
+
+# Database (Production DB ကို repo ထဲ မထည့်ရပါ)
+*.sqlite3
+*.db
+*.sqlite
+data/
+
+# Logs & Runtime
+*.log
+logs/
+nohup.out
+.pytest_cache/
+
+# OS Specific
+.DS_Store
+Thumbs.db

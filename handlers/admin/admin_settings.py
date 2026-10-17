@@ -16,11 +16,11 @@ async def set_daily_limit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not is_owner(update.effective_user.id): return
     args = context.args
     if len(args) < 1:
-        return await update.message.reply_text("⚠️ အသုံးပြုနည်း: `/setlimit <အရေအတွက်>`\n(ဥပမာ - `/setlimit 3` [တစ်နေ့ ၃ ခုသာ ခွင့်ပြုရန်])", parse_mode=ParseMode.HTML)
+        return await update.message.reply_text("⚠️ အသုံးပြုနည်း: `/setlimit အရေအတွက်`\n(ဥပမာ - `/setlimit 3` [တစ်နေ့ ၃ ခုသာ ခွင့်ပြုရန်])", parse_mode=ParseMode.HTML)
     try:
         val = int(args[0])
         db = get_db()
-        if db: await db.settings.update_one({"type": "daily_limit"}, {"$set": {"count": val}}, upsert=True)
+        if db is not None: await db.settings.update_one({"type": "daily_limit"}, {"$set": {"count": val}}, upsert=True)
         status = f"<b>{val} ခု</b>" if val > 0 else "<b>အကန့်အသတ်မရှိ (Unlimited)</b>"
         await update.message.reply_text(f"✅ တစ်နေ့စာ Confession ပို့ခွင့် အကြိမ်အရေအတွက်ကို {status} သို့ သတ်မှတ်လိုက်ပါပြီ。", parse_mode=ParseMode.HTML)
     except ValueError:
