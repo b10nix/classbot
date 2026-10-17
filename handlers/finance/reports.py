@@ -91,12 +91,14 @@ async def vault_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 1. Fetch Carry-over / Opening Balance
     # First priority: fund_transactions collection
+    # Vault အတွက် Opening Balance ကို fund_transactions မှ တိုက်ရိုက်ဆွဲယူခြင်း
     opening_tx = await db.fund_transactions.find_one({
         "$or": [
             {"type": "opening_balance"},
             {"is_opening": True}
         ]
     })
+    carry_over_amount = float(opening_tx.get("amount", 0.0)) if opening_tx else 0.0
 
     carry_over_amount = 0.0
     semester_label = "Current"

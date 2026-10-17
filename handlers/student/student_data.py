@@ -94,7 +94,10 @@ async def inline_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = get_db()
     
     # 📌 1. Database မှ Fund အားလုံးကို ဆွဲထုတ်မည်
-    all_funds = await db.funds.find({}).to_list(length=None)
+    all_funds = await db.funds.find({
+    "status": "active",
+    "type": {"$ne": "opening_balance"}  # opening_balance မဟုတ်သော တကယ့် ကျောင်းသားကြေးများကိုသာ ဆွဲမည်
+    }).to_list(length=None)
     
     # 📌 2. Archived ဖြစ်နေသော Fund များကို ရှာဖွေမည်
     sys_config = await db.sys_config.find_one({"type": "archived_funds"})

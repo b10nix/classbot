@@ -151,7 +151,7 @@ async def end_semester_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Step E: သတ်မှတ်ထားသော EC ထံသို့ Opening Balance အသစ် ထည့်သွင်းပေးခြင်း
         if starting_balance > 0:
-            # 1. ဗဟို Fund Transaction ထဲသို့ သွင်းခြင်း
+            # 1. ဗဟို Vault (/vault) တွက်ချက်မှုအတွက်သာ fund_transactions ထဲသို့ သွင်းမည်
             await db.fund_transactions.insert_one({
                 "type": "opening_balance",
                 "amount": starting_balance,
@@ -163,18 +163,11 @@ async def end_semester_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "is_opening": True
             })
 
-            # 2. EC Dashboard (/me, /ecstat) တွင် Income အဖြစ် ပေါ်စေရန် funds collection ထဲသို့ fund_id အပြည့်အစုံဖြင့် ထည့်သွင်းခြင်း
-            await db.funds.insert_one({
-                "fund_id": f"opening_{semester_name.lower()}",
-                "fund_name": f"Carry-over Balance ({semester_name})",
-                "target_amount": int(starting_balance),
-                "managed_by": ec_key,
-                "status": "active",
-                "type": "opening_balance",
-                "created_at": now_str
-            })
+            # ❌ [ဖယ်ရှားရမည့် အပိုင်း]: db.funds.insert_one(...) ကို လုံးဝ မသုံးရပါ။
+            # db.funds သည် ကျောင်းသားများ ပေးသွင်းရမည့် အခကြေးငွေ Definition သီးသန့် ဖြစ်သည်။
 
-            # 3. EC Ledger ၏ transferred_in ထဲသို့ Opening Balance ထည့်ပေးခြင်း
+            # 2. EC Dashboard (/me, /ecstat, /spend) တွင် သုံးစွဲနိုင်သော လက်ကျန်ငွေအဖြစ် ပေါ်စေရန်
+            #    ec_ledgers ထဲသို့ transferred_in အဖြစ် မှတ်တမ်းတင်ခြင်း
             await db.ec_ledgers.update_one(
                 {"$or": [{"ec_id": ec_user_id}, {"user_id": ec_user_id}, {"username": ec_key}]},
                 {
@@ -184,7 +177,8 @@ async def end_semester_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "username": ec_key,
                         "total_spent": 0,
                         "transferred_out": 0,
-                        "transferred_in": starting_balance,
+                        "transferred_in": int(starting_balance),
+                        "opening_note": f"Carry-over ({semester_name})",
                         "expenses": []
                     }
                 },
