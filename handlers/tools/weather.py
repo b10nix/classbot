@@ -9,6 +9,7 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from database.db import get_db
+from utils.constants import CLASS_GROUP_IDS
 
 logger = logging.getLogger(__name__)
 
@@ -151,12 +152,7 @@ async def auto_delete_weather(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def morning_weather_alert(context: ContextTypes.DEFAULT_TYPE):
-    group_id_str = os.getenv("CLASS_GROUP_ID", "0")
-    groups = [
-        int(g.strip())
-        for g in group_id_str.split(",")
-        if g.strip() and g.strip() != "0"
-    ]
+    groups = list(CLASS_GROUP_IDS)
 
     msg = await format_weather_msg()
     final_msg = f"🌅 <b>မင်္ဂလာနံနက်ခင်းပါ</b>\n\n{msg}"

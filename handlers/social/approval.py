@@ -15,24 +15,24 @@ async def admin_approval_action(update: Update, context: ContextTypes.DEFAULT_TY
     if not (query.data.startswith("aprv_") or query.data.startswith("rjct_")):
         return
     await query.answer()
-    
+
     action, post_id = query.data.split("_")
     db = get_db()
     if db is None:
         return
-    
+
     try:
         post = await db.pending_posts.find_one_and_delete({"post_id": post_id})
         if not post:
             return await query.edit_message_text(
-                f"{query.message.text}\n\n⚠️ <i>ဤစာအား အခြား Admin တစ်ဦးမှ စိစစ်ပြီးသွားပါပြီ။</i>", 
+                f"{query.message.text}\n\n⚠️ <i>ဤစာအား အခြား Admin တစ်ဦးမှ စိစစ်ပြီးသွားပါပြီ။</i>",
                 parse_mode=ParseMode.HTML
             )
-            
+
         admin_name = update.effective_user.first_name
         action_text = "APPROVED" if action == "aprv" else "REJECTED"
         sender_id = post.get('sender_id')
-        
+
         # 📌 1. Admin များကို အသိပေးခြင်း
         admin_msgs = post.get("admin_msgs", [])
         for adm in admin_msgs:
@@ -41,16 +41,16 @@ async def admin_approval_action(update: Update, context: ContextTypes.DEFAULT_TY
             try:
                 if chat_id == update.effective_user.id:
                     await context.bot.edit_message_text(
-                        chat_id=chat_id, 
-                        message_id=msg_id, 
-                        text=f"{query.message.text}\n\n<b>✅ {action_text}</b>", 
+                        chat_id=chat_id,
+                        message_id=msg_id,
+                        text=f"{query.message.text}\n\n<b>✅ {action_text}</b>",
                         parse_mode=ParseMode.HTML
                     )
                 else:
                     await context.bot.edit_message_text(
-                        chat_id=chat_id, 
-                        message_id=msg_id, 
-                        text=f"{query.message.text}\n\n⚠️ <i>Action taken by {admin_name} ({action_text})</i>", 
+                        chat_id=chat_id,
+                        message_id=msg_id,
+                        text=f"{query.message.text}\n\n⚠️ <i>Action taken by {admin_name} ({action_text})</i>",
                         parse_mode=ParseMode.HTML
                     )
             except Exception:
@@ -62,12 +62,12 @@ async def admin_approval_action(update: Update, context: ContextTypes.DEFAULT_TY
                 admin_display = get_safe_user_link(update.effective_user)
                 # Universal helper ဖြင့် DB snapshot မှ Profile Link ကို resolve လုပ်ခြင်း
                 sender_display = get_safe_user_link(post)
-                
+
                 send_time = post.get('time', 'Unknown Time')
                 sig_line = f"🎭 <b>Signature:</b> {html.escape(post.get('name', ''))}\n" if post.get('type') == 'confess_custom' else ""
-                
+
                 post_type_label = "Confession" if "confess" in post.get('type', '') else "Post"
-                
+
                 log_txt = (
                     f"🚨 <b>SYSTEM LOG | #{post_type_label}</b>\n"
                     f"🎯 <b>Target:</b> {post.get('target')}\n"
@@ -78,9 +78,9 @@ async def admin_approval_action(update: Update, context: ContextTypes.DEFAULT_TY
                     f"<b>Status:</b> {'✅ APPROVED' if action == 'aprv' else '❌ REJECTED'} by {admin_display}"
                 )
                 await context.bot.edit_message_text(
-                    chat_id=LOG_GROUP_ID, 
-                    message_id=post["log_msg_id"], 
-                    text=log_txt, 
+                    chat_id=LOG_GROUP_ID,
+                    message_id=post["log_msg_id"],
+                    text=log_txt,
                     parse_mode=ParseMode.HTML
                 )
             except Exception as e:
@@ -104,7 +104,7 @@ async def admin_approval_action(update: Update, context: ContextTypes.DEFAULT_TY
             allowed_groups = await get_allowed_groups(sender_id, context)
             target_ids = allowed_groups if target == "all" else [int(target)]
             sender_emoji = await get_user_identity(sender_id)
-            
+
             # Format နှင့် Signature ခွဲခြားခြင်း
             if post.get('type') == 'confess_anon':
                 signature = "Anonymous"
@@ -115,20 +115,20 @@ async def admin_approval_action(update: Update, context: ContextTypes.DEFAULT_TY
             else:
                 signature = sender_emoji
                 final_msg = f"💬 <b>POST</b>\n\n<pre>{html.escape(post.get('msg', ''))}</pre>\n\n- {signature}{FOOTER}"
-            
+
             bot_username = context.bot.username
             published_targets = []
-            
+
             for gid in target_ids:
-                try: 
+                try:
                     reply_markup = InlineKeyboardMarkup([[
                         InlineKeyboardButton(f"💬 Reply to {signature}", url=f"https://t.me/{bot_username}?start=reply_{post_id}_{gid}")
                     ]])
                     sent_msg = await context.bot.send_message(chat_id=gid, text=final_msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
                     published_targets.append({"chat_id": gid, "msg_id": sent_msg.message_id})
-                except Exception as e: 
+                except Exception as e:
                     logger.error(f"Failed to send approved broadcast to group {gid}: {e}")
-                    
+
             # 📌 5. Database တွင် မှတ်တမ်းတင်ခြင်း
             if published_targets:
                 await db.published_posts.insert_one({
@@ -139,7 +139,7 @@ async def admin_approval_action(update: Update, context: ContextTypes.DEFAULT_TY
                     "sender_username": post.get("sender_username"),
                     "targets": published_targets
                 })
-                    
+
     except Exception as e:
         logger.error(f"Critical error in admin_approval_action: {e}")
         await query.edit_message_text("<pre>❌ System Error Occurred During Approval.</pre>", parse_mode=ParseMode.HTML)

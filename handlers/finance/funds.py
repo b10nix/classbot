@@ -10,9 +10,9 @@ logger = logging.getLogger(__name__)
 # ================= 🗑 Auto Delete စနစ် =================
 async def auto_delete_job(context: ContextTypes.DEFAULT_TYPE):
     """JobQueue မှ ခေါ်သုံးမည့် Auto Delete ဖန်ရှင်"""
-    try: 
+    try:
         await context.bot.delete_message(chat_id=context.job.chat_id, message_id=context.job.data)
-    except Exception: 
+    except Exception:
         pass
 
 def schedule_delete(context, chat_id, msg_id, delay):
@@ -91,7 +91,7 @@ async def check_fund(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Group အတွင်း ကျောင်းသားများ ဝင်ငွေကြည့်ရန် Command (/fund)"""
     chat_id = update.effective_chat.id
     user_msg_id = update.message.message_id
-    
+
     db = get_db()
     if db is None: return
 
@@ -104,7 +104,7 @@ async def check_fund(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📥 စုစုပေါင်း ဝင်ငွေ: {total:,} ကျပ်"
     )
     sent_msg = await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
-    
+
     # 👈 [Auto Delete] - User ရိုက်သော /fund စာ နှင့် Bot ပြန်သောစာ နှစ်ခုလုံးကို (၈၀) စက္ကန့်အကြာတွင် ဖျက်မည်
     schedule_delete(context, chat_id, user_msg_id, 80)
     schedule_delete(context, chat_id, sent_msg.message_id, 80)

@@ -13,7 +13,7 @@ def is_super_admin(user_id: int) -> bool:
     # Owner ဆိုရင် အလိုလို Super Admin ဖြစ်ပြီးသားပါ
     if is_owner(user_id):
         return True
-    
+
     sa_str = os.getenv("SUPER_ADMINS", "")
     if sa_str:
         try:
@@ -21,5 +21,5 @@ def is_super_admin(user_id: int) -> bool:
             return user_id in admins
         except ValueError as e:
             logger.error(f"Invalid SUPER_ADMINS format in .env: {e}")
-            
+
     return False

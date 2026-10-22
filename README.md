@@ -1,335 +1,237 @@
-# 🟢 OMNI-NET TERMINAL V4 (Code Name: Plumber)
+<div align="center">
 
-> *"Everything is a system. Everyone is a variable."*
->
-> **Designed & Maintained by Ben (The Architect)**
+# 🟢 OMNI-NET TERMINAL `V4.5`
+### Code name: **PLUMBER**
 
-![Python](https://img.shields.io/badge/Python-3.11+-blue)
-![Framework](https://img.shields.io/badge/python--telegram--bot-v22+-blueviolet)
-![MongoDB](https://img.shields.io/badge/Database-MongoDB-success)
-![Async](https://img.shields.io/badge/Architecture-Async-green)
-![Status](https://img.shields.io/badge/Status-Online-brightgreen)
+**Everything is a system. Everyone is a variable.**
 
----
+*An asynchronous, role-aware Telegram platform for university class operations.*
 
-## 📖 About
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?logo=telegram&logoColor=white)
+![Async](https://img.shields.io/badge/Architecture-Async-16A34A)
+![Database](https://img.shields.io/badge/Database-MongoDB-47A248?logo=mongodb&logoColor=white)
+![License](https://img.shields.io/badge/Purpose-Educational-64748B)
 
-**Omni-Net Terminal** is an asynchronous Telegram-based class management platform built to automate academic administration, class finance, and community interaction.
+**Designed & maintained by Ben (The Architect)**
 
-Originally developed to solve simple timetable problems, the project has gradually evolved into a complete ecosystem that manages multiple university class groups from a single platform.
-
-Instead of flooding group chats with commands and repetitive reminders, Omni-Net handles everything automatically while keeping conversations clean through its built-in auto-delete system.
+</div>
 
 ---
 
-# ✨ Core Features
+## `01` — Overview
 
-## 🎓 Academic Management
+**Omni-Net Terminal** is a modular Telegram bot for running multiple university class groups from one system. It brings academic tools, attendance, class finance, student records, community posts and moderation into a single interface.
 
-### 📅 Smart Timetable
-- Instant timetable lookup (`/it`, `/ec`, etc.)
-- Multi-major class merging
-- Automatic class reminders before every class
+The bot is built around asynchronous handlers, MongoDB-backed records and role-aware inline menus. Students see general modules; Major ECs get Major-scoped operations; Super Admin and Owner controls are restricted and checked again when protected pages are opened.
 
-### 📝 Tasks & Tutorials
-- View assignments and tutorials
-- Automatic deadline reminders
-- Due-date tracking
+> The V4.5 label is used for this feature-and-maintenance release. The code name remains **Plumber**.
 
-### ✅ Smart Attendance
-- Random 6-digit attendance PIN
-- DM-based Roll Call
-- Attendance report generation
+## `02` — System modules
 
-### 📊 75% Attendance Calculator
-Calculate exactly how many classes can still be skipped before falling below attendance requirements.
+### 🎓 Academic operations
 
-Command
+- **Timetable** — view class schedules by Major and use supported Major shortcuts.
+- **Class reminders** — scheduled reminders for configured Major groups.
+- **Tasks & tutorials** — add, view and edit academic tasks, with due-date reminders.
+- **Attendance** — open a session with a PIN, close it from its inline control and review attendance dates.
+- **75% attendance calculator** — use `/skip` to estimate the remaining absence allowance.
 
-```
-/skip
+Common commands:
+
+```text
+/timetable     /tt
+/ceit          /ep          /ec
+/archi         /mc          /mech          /civil
+/tasks         /tutorials    /skip          /rollcall
 ```
 
----
+### 💳 Finance & fund ledger
 
-# 💰 Finance Management
+Major ECs can use the finance workspace to manage collections and record activity. Available command families include:
 
-Designed for ECs and class treasurers.
+- Funds: `/newfund`, `/funds`, `/archive_fund`, `/unarchive_fund`
+- Payments: `/pay`, `/undo`, `/history`, `/remind`
+- Expenses and allocation: `/spend`, `/allocate`
+- Summaries and exports: `/vault`, `/report`, `/fundstat`, `/ecstat`, `/export`, `/exportfund`, `/export_finance`, `/semhistory`
 
-## 💵 Fund Management
+Finance access is permission-checked. Commands that need a Fund ID, roll number or amount accept those values as arguments or request them through the relevant flow.
 
-- Monthly fees
-- Custom funds
-- Active / Archived funds
-- Fund allocation
-- Expense tracking
+### 🪪 Student registry
 
-## 💳 Payment System
+Student self-registration uses one guided flow rather than separate `/add` and `/ph` steps:
 
-- Record student payments
-- Undo incorrect transactions
-- Spending history
-- Remaining balance calculation
-
-## 📊 EC Dashboard
-
-Every EC has a personalized dashboard displaying
-
-- Assigned students
-- Active collections
-- Total collected
-- Total spent
-- Current balance
-
-## 📄 Reports
-
-Generate Excel reports instantly.
-
-Features include
-
-- Paid / Unpaid status
-- Color-coded spreadsheets
-- Automatic sorting
-- Reminder messages for unpaid students
-
----
-
-# 💬 Community Platform
-
-## 🤫 Confession System
-
-Students can anonymously express themselves through
-
-```
-/confess
-/confess1
+```text
+/register
+/myprofile
 ```
 
-Supports
+The registration flow gathers a roll number, Major selection when needed, English name, phone number and hostel status before confirmation. Major assignment is resolved from configured Major group membership; the flow should not guess a Major when it cannot resolve one.
 
-- Anonymous confession
-- Custom signature
-- Admin approval before publishing
+EC tools include student lists and supported record maintenance commands such as `/list`, `/hostel`, `/setphone` and `/settg`.
 
----
+### 💬 Community & identity
 
-## 💬 Community Posts
+- `/confess` and `/confess1` — confession workflows.
+- `/post` — submit a community post from the bot DM.
+- `/nickname` — manage the supported nickname feature.
+- **Replies** — respond through a published post's Reply button; the bot routes the reply to the related discussion destination.
+- **Moderation** — eligible moderators can approve or reject pending content. Moderation actions are recorded in the configured log group.
 
-Students can create public posts directly from Bot DM.
+Use the bot in a private chat for flows that ask questions or collect a submission. The exact steps shown by the bot are authoritative for each workflow.
 
+### 🛠️ Utilities
+
+| Area | Commands |
+|---|---|
+| General | `/weather`, `/wifi`, `/status`, `/creator` |
+| Text / encoding | `/encrypt`, `/decrypt`, `/bin2hex`, `/hex2bin` |
+| Group utilities | `/mention`, `/addcmd1`, `/addcmd2`, `/addcmd3`, `/delcmd` |
+| Major / EC administration | `/setmajor`, `/setsemester`, `/setgroupmajor`, `/routes`, `/addec`, `/delec`, `/eclist` |
+
+Some commands are restricted to group administrators, a registered Major EC, Super Admins or the Owner. A command appearing in this document does not bypass the permission checks enforced by the bot.
+
+## `03` — Access model
+
+| Role | Typical access |
+|---|---|
+| Student / public user | Academic lookup, social features, utilities and own profile |
+| Major EC | Authorized Major's academic, student and finance operations |
+| Super Admin | EC registry, Major/group routing and automation/data tools |
+| Owner | Owner-only configuration and system administration |
+
+Menu visibility is only a convenience layer. Protected callbacks and commands must still pass their authorization checks.
+
+## `04` — Architecture
+
+```text
+Telegram users & class groups
+            │
+            ▼
+  python-telegram-bot (async)
+            │
+   ┌────────┼─────────┐
+   ▼        ▼         ▼
+Academic  Community  Finance & Registry
+handlers  handlers     handlers
+   └────────┼─────────┘
+            ▼
+      Shared MongoDB
+            │
+            ▼
+ Scheduled reminders / Excel exports
 ```
-/post
-```
 
-Features
+- **Runtime:** Python 3.11+
+- **Telegram framework:** `python-telegram-bot` with async handlers and JobQueue
+- **Database:** MongoDB via Motor (async driver)
+- **Reports:** `openpyxl`
+- **Deployment:** Linux VPS; PM2 can supervise the process
+- **Structure:** modular handlers, inline callback menus, role-aware access and scheduled jobs
 
-- Multi-group broadcasting
-- Permanent identity
-- Admin approval
-- Interactive replies
+## `05` — Installation
 
----
+### Requirements
 
-## 🎭 Identity System
+- Python 3.11 or newer
+- A Telegram bot token from BotFather
+- A MongoDB URI
+- A Linux VPS or another environment that can keep the bot process running
+- PM2 is optional and used for process supervision in the example below
 
-Each user receives a permanent identity.
-
-Supported identities
-
-- Random Emoji
-- Custom Nickname (one-time change)
-
-Identity remains consistent across future posts.
-
----
-
-## 💬 Reply System
-
-Every published post includes a Reply button.
-
-Replies are handled inside Bot DM and automatically return to the original group while keeping discussions organized.
-
----
-
-# 🛡 Moderation System
-
-## Admin Approval Workflow
-
-Every confession and post enters an approval queue.
-
-Admins can
-
-- Approve
-- Reject
-
-simultaneously from multiple devices without conflicts.
-
----
-
-## Moderation Logs
-
-A dedicated log group records
-
-- Sender information
-- Content
-- Target groups
-- Approval history
-- Moderator actions
-
----
-
-# 🛠 Utilities
-
-General utilities
-
-- `/weather`
-- `/wifi`
-- `/status`
-- `/creator`
-
-Developer utilities
-
-- `/encrypt`
-- `/decrypt`
-- `/bin2hex`
-- `/hex2bin`
-
----
-
-# ⚙ Architecture
-
-Language
-
-- Python 3.11+
-
-Framework
-
-- python-telegram-bot (Async)
-
-Database
-
-- MongoDB (Motor AsyncIO)
-
-Spreadsheet
-
-- openpyxl
-
-Deployment
-
-- Linux VPS
-- PM2 Process Manager
-
-Architecture Highlights
-
-- Fully Asynchronous
-- Modular Handler System
-- Multi-group Support
-- Interactive Inline UI
-- Auto-delete Mechanism
-- MongoDB-backed Storage
-
----
-
-# 🚀 Installation
-
-## Clone Repository
+### Clone and install
 
 ```bash
 git clone https://github.com/nobix666/classbot.git
-
 cd classbot
-```
 
----
-
-## Install Dependencies
-
-```bash
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
----
+### Configure environment
 
-## Configure Environment
+Create `.env` in the project root. Start from `.env.example` if it is present, and use the variable names below. Replace placeholders with your own values; do not commit real tokens, database URIs or private group IDs.
 
-Create
+```dotenv
+TELEGRAM_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
+MONGO_URI=YOUR_MONGODB_URI
+OWNER_ID=YOUR_TELEGRAM_USER_ID
+LOG_GROUP_ID=YOUR_LOG_GROUP_ID
 
-```
-.env
-```
-
-Example
-
-```env
-BOT_TOKEN=
-
-MONGO_URI=
-
-OWNER_ID=
-
+# Shared community groups; comma-separated Telegram chat IDs
 CLASS_GROUP_ID=-100111111111,-100222222222
 
-LOG_GROUP_ID=-100333333333
+# Major-specific groups; enter one or more IDs per configured Major
+CEIT_MAJOR=
+EP_MAJOR=
+EC_MAJOR=
+ARCHI_MAJOR=
+MC_MAJOR=
+MECH_MAJOR=
+CIVIL_MAJOR=
 
-VIP_USER=
-
-SUPER_ADMIN=
+WEATHER_API_KEY=YOUR_WEATHER_API_KEY
+SUPER_ADMINS=123456789,987654321
+VIP_USERS=
+USE_MAJOR_DATABASES=false
+MONGO_SHARED_DB_NAME=ClassBotDB
 ```
 
-Supports multiple class groups by separating IDs with commas.
+**Configuration notes**
 
----
+- The project `.env.example` uses `TELEGRAM_TOKEN` (not `BOT_TOKEN`) and `SUPER_ADMINS` (not `SUPER_ADMIN`).
+- All Majors use the shared database by default. Keep `USE_MAJOR_DATABASES=false` unless the application's database configuration is intentionally being changed.
+- Use comma-separated Telegram IDs where a setting supports multiple values.
+- The bot needs permission to access the configured groups and send messages where reminders, posts or logs are expected.
 
-## Run
+### Run directly
 
 ```bash
-pm2 start main.py \
---name plumber \
---interpreter ./venv/bin/python
+python main.py
 ```
 
+### Run with PM2
+
+With the virtual environment named `venv` in the project root:
+
 ```bash
+pm2 start main.py --name plumber --interpreter ./venv/bin/python
 pm2 save
+pm2 status
+pm2 logs plumber
 ```
 
----
+## `06` — Release direction
 
-# 💡 Highlights
+V4.5 focuses on making the current system easier to operate and maintain:
 
-- Interactive terminal interface (`/start`)
-- Multi-group architecture
-- Persistent identity system
-- Admin approval workflow
-- Automated finance management
-- Attendance automation
-- Excel reporting
-- Reply-based community discussions
-- Automatic cleanup to reduce chat clutter
+- Clearer terminal-style `/start` menu and module labels
+- Role-aware EC, Super Admin and Owner menu visibility
+- Guided `/register` entry point in place of the old split registration instructions
+- Documentation aligned with the current environment variable names and setup flow
 
----
+The next development focus is maintainability, careful refactoring, performance and stronger automated tests rather than adding features for their own sake.
 
-# 🗺 Roadmap
+## `07` — Safety & maintenance
 
-Current focus is no longer adding major features.
+- Keep `.env` out of Git and never paste live bot tokens or database credentials into public issues.
+- Rotate credentials immediately if they are exposed.
+- Test permission-sensitive flows with student, EC, Super Admin and Owner accounts before deployment.
+- Take a database backup before data cleanup, migration or reconciliation commands.
+- Verify group IDs, permissions and environment values before enabling scheduled broadcast features.
 
-Future development primarily focuses on
+## License
 
-- Architecture refinement
-- Code maintainability
-- Performance optimization
-- Internal refactoring
-- Developer experience
+Built primarily for educational purposes and university class management. No separate open-source license is declared in this README; add a `LICENSE` file if a formal license is intended.
 
 ---
 
-# 📜 License
+<div align="center">
 
-This project was built primarily for educational purposes and university class management.
+**OMNI-NET TERMINAL V4.5 · PLUMBER**
+*Everything is a system. Everyone is a variable.*
 
----
-
-Created and maintained by
-
-**Ben (The Architect)**
-
-*"Everything is a system. Everyone is a variable."*
+</div>

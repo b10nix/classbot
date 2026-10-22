@@ -37,10 +37,10 @@ def main():
         return
 
     app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
-    
+
     # 🚀 Background Jobs
     app.job_queue.run_repeating(class_reminder_job, interval=60, first=10)
-    app.job_queue.run_repeating(tasks_reminder_job, interval=3600, first=10)
+    app.job_queue.run_repeating(tasks_reminder_job, interval=60, first=10)
 
     # 📌 Morning Auto Weather Alert
     mm_tz = timezone(timedelta(hours=6, minutes=30))

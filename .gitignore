@@ -1,7 +1,10 @@
 # Environment & Secrets
+# Environment & Secrets
 .env
 .env.*
+!.env.example
 *.env
+!.env.example
 config.json
 secrets.py
 

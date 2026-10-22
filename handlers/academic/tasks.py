@@ -65,7 +65,7 @@ async def get_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tasks = await cursor.to_list(length=100)
 
     title = "📝 <b>လာမည့် Assignments များ</b>" if task_type == "assignment" else "📝 <b>လာမည့် Tutorials များ</b>"
-    
+
     if not tasks:
         await update.message.reply_text(f"{title}\n━━━━━━━━━━━━━━━━━━\n📭 လတ်တလော မရှိသေးပါ။", parse_mode="HTML")
         return

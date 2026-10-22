@@ -82,11 +82,11 @@ async def approvers_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     data = query.data
     if not is_owner(update.effective_user.id): return await query.answer("⚠️ Owner Only")
     db = get_db()
-    
+
     if data == "cancel_app":
         await query.edit_message_text("<pre>✅ Approver management closed.</pre>", parse_mode=ParseMode.HTML)
         return ConversationHandler.END
-        
+
     if data.startswith("delapp_"):
         uid = int(data.split("_")[1])
         if db is not None: await db.approvers.delete_one({"user_id": uid})
